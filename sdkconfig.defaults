@@ -1,0 +1,16 @@
+# TaskMaster-C3 — ESP-IDF default config (baked baseline; tweak via `menuconfig`)
+
+# --- Flash / partitions ---
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- FreeRTOS: 1kHz tick so the 1ms input poll task is responsive (PLAN §4.6) ---
+CONFIG_FREERTOS_HZ=1000
+
+# --- HTTP server: room for the provisioning form POST later ---
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+
+# --- Logging ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
