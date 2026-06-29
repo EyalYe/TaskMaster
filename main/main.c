@@ -1,11 +1,11 @@
 /*
- * main.c — TaskMaster-C3 Phase 0 bring-up (PLAN §14, Phase 0).
+ * main.c — TaskMaster-C3 firmware composition root (PLAN §14, Phase 1).
  *
- * Exercises all four Phase-0 exit criteria in one firmware:
- *   1. App boots (ESP-IDF + partition table).
- *   2. OLED draws (SH1106 over I2C).
- *   3. knob/buttons register (encoder + 3 buttons → event queue, shown live).
- *   4. A phone loads a page served by the device over SoftAP (+ captive DNS).
+ * Thin: brings up NVS + core platform services, then lists the apps that
+ * self-registered (via constructors) from their own components before app_main.
+ * Proves the manifest-driven, self-registering app model across the component
+ * boundary (taskmaster_core ← app_hello, listed in main/idf_component.yml).
+ * The Phase-0 bring-up (OLED / input / SoftAP) now lives in taskmaster_core.
  */
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
@@ -16,14 +16,18 @@
 #include "sh1106.h"
 #include "input.h"
 #include "softap_portal.h"
+#include "app_manager.h"
 
 static const char *TAG = "main";
 
 static void draw_splash(void)
 {
+    char apps[24];
     sh1106_clear();
     sh1106_text_line(0, "TASKMASTER-C3");
-    sh1106_text_line(1, "PHASE 0 BRINGUP");
+    sh1106_text_line(1, "PHASE 1 CORE");
+    snprintf(apps, sizeof(apps), "APPS: %u", app_manager_count());
+    sh1106_text_line(2, apps);
     sh1106_text_line(3, "AP: TASKMASTER-SETUP");
     sh1106_text_line(4, "HTTP 192.168.4.1");
     sh1106_text_line(6, "LAST EVENT:");
@@ -40,21 +44,24 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    /* (2) OLED */
     if (sh1106_init() != ESP_OK) {
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");
     }
+
+    /* Apps self-registered before app_main — enumerate the registry. */
+    ESP_LOGI(TAG, "Registered apps: %u", app_manager_count());
+    for (unsigned i = 0; i < app_manager_count(); i++) {
+        ESP_LOGI(TAG, "  app[%u] = %s", i, app_manager_get(i)->name);
+    }
+
     draw_splash();
 
-    /* (3) input */
     QueueHandle_t events = input_init();
-
-    /* (4) SoftAP + HTTP + captive DNS */
     ESP_ERROR_CHECK(softap_portal_start());
 
-    ESP_LOGI(TAG, "Phase 0 up. Join '%s' and browse http://%s", SOFTAP_SSID, SOFTAP_IP);
+    ESP_LOGI(TAG, "Phase 1 up. Join '%s' and browse http://%s", SOFTAP_SSID, SOFTAP_IP);
 
-    /* Live event loop: log + show the last input on the OLED. */
+    /* Live input loop (Launcher UI replaces this later in Phase 1). */
     uint32_t count = 0;
     input_event_t ev;
     for (;;) {

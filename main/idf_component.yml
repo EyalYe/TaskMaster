@@ -1,0 +1,13 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  APP MANIFEST — the editable app list (PLAN §6.1).
+#  Comment a line out to remove that app: it isn't built, linked, or shown.
+#  Add an app with one line: a local `path:` (in-tree, under apps/) or a `git:`
+#  URL to the app's own repo. No core edits needed; apps self-register.
+#  (taskmaster_core is auto-discovered under components/ and required by main.)
+# ═══════════════════════════════════════════════════════════════════════════
+dependencies:
+  app_hello:
+    path: ../apps/app_hello
+  # app_clock:
+  #   git: https://github.com/somedev/tm-clock.git
+  #   version: v0.2.0

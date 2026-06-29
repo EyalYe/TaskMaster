@@ -1,6 +1,9 @@
 # ESP-IDF build output
 /build/
 
+# Timestamped backups of successful builds (tools/backup_build.sh)
+/build_backups/
+
 # Generated config (regenerated from sdkconfig.defaults)
 /sdkconfig
 /sdkconfig.old
