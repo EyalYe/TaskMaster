@@ -106,5 +106,7 @@ the gitignored `build_backups/`.
 
 ## Next: Phase 2 — provisioning portal
 
-Replace the placeholder SoftAP page with the paste-from-phone setup form that writes Wi-Fi creds +
-source URLs + tokens to NVS in one paste. See [`PLAN.md`](PLAN.md) §7.
+A **Setup/Wi-Fi core app** (built-in, non-removable) replaces the placeholder SoftAP page with the
+paste-from-phone setup form — Wi-Fi creds + source URLs + tokens written to NVS in one paste. It
+auto-launches when the device is unprovisioned and is reachable from the Launcher anytime to
+re-provision. Phase 2 also stands up the §6A.4 leak harness. See [`PLAN.md`](PLAN.md) §7.

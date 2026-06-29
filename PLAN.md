@@ -311,9 +311,23 @@ strip (compact glyphs + short labels, e.g. `↻ Scroll · ◉ Open · ✓ Done`)
 defaults so even a bare app gets usable hints. Cost is tiny: one LVGL label row, redrawn only when
 hints change (fits the on-demand render model, §4.2).
 
-### Core apps
-- **App 1 — OS Launcher (boot default):** vertical scrolling list over the registered `device_app_t`
-  table. Encoder rotate moves highlight; encoder click (or Select) → `app_manager_switch_to()`.
+### Apps — core (built-in, non-removable) vs. user (manifest-driven, removable)
+
+Two classes share the one `device_app_t` interface:
+- **Core apps** are compiled into `taskmaster_core` and register themselves unconditionally — they are
+  **not** listed in `main/idf_component.yml` and the user **cannot remove** them. These are the OS:
+  the Launcher, **Setup/Wi-Fi**, and Settings.
+- **User apps** are separate components added/removed via the manifest (§6.1) — e.g. the Task Manager
+  instances, and bundled examples like Pomodoro. Removing one is a one-line manifest edit.
+
+- **App 1 — OS Launcher (boot default, core):** vertical scrolling list over the registered
+  `device_app_t` table. Encoder rotate moves highlight; encoder click (or Select) →
+  `app_manager_switch_to()`.
+- **App — Setup / Wi-Fi (core, non-removable):** the provisioning app (§7). Always present in the
+  Launcher so the user can **re-provision at any time**, and **auto-launched at boot** when the device
+  is unprovisioned (or Home is held at boot, or config is missing). Drives the core SoftAP + HTTP
+  portal service (it does not spawn its own tasks, §6A.2); its `exit()` tears the portal down so it
+  never outlives the app. See §7 for the flow.
 - **App 2 & 3 — Task Manager, two instances ("Yapp" + "Local"):** one Task Manager *component* (the
   hardware embodiment of `yappmark`/`todomark`, §8) registered **twice**, each bound to a different
   task source via config. Both speak the identical device contract (§8.1); only base URL + token
@@ -328,14 +342,15 @@ hints change (fits the on-demand render model, §4.2).
   reflects the current mode.
 
   Sync runs on app entry + periodically. A source with no configured URL stays hidden in the Launcher.
-- **App 4 — Settings:** on-device control of device *behavior* (§8A). Booleans/enums/numbers —
-  knob-editable, no typing.
+- **App 4 — Settings (core, non-removable):** on-device control of device *behavior* (§8A).
+  Booleans/enums/numbers — knob-editable, no typing.
   - **Startup behavior** — boot into Launcher (default) · a specific app · last-used app.
   - **Deep sleep** — on/off master toggle (forward-looking for the battery build).
   - **Inactivity timeout** — Off · 30s · 1m · 5m · 15m before dim/sleep.
   - (Room to grow: brightness, sync interval — same settings-schema pattern.)
   Each setting persists to NVS immediately on change (§9).
-- **App 5 — Pomodoro (Phase 2):** proves the framework for third-party devs (no network needed).
+- **Pomodoro (user app, Phase 5):** a bundled *removable* example that proves the framework for
+  third-party devs (no network needed).
 
 ---
 
@@ -395,9 +410,11 @@ after Home **equals** the value before launch. Run it per app, and explicitly **
 
 ## 7. Provisioning — paste everything from your phone
 
-**Core principle:** every value that lands in NVS is entered through the provisioning app by pasting
-from a phone or laptop. Nothing is hardcoded; nothing is dialed in letter-by-letter. One form, paste,
-submit, done — for today's fields and any added later.
+**Core principle:** every value that lands in NVS is entered through the **Setup/Wi-Fi core app**
+(§6, non-removable) by pasting from a phone or laptop. Nothing is hardcoded; nothing is dialed in
+letter-by-letter. One form, paste, submit, done — for today's fields and any added later. The Setup
+app is **auto-launched at boot** when unprovisioned (or Home-held-at-boot / config missing) and is
+**also reachable from the Launcher anytime** to re-provision.
 
 ### Primary path — SoftAP setup portal (MVP)
 Built on ESP-IDF's **SoftAP + `esp_http_server` + a small DNS captive-portal responder** (all
@@ -420,7 +437,7 @@ standard, well-supported components):
 The OLED's role during setup is purely **instructional** (network name, URL, status) — the knob never
 enters characters.
 
-### Second transport — BLE provisioning (Phase 2, cheap to add)
+### Second transport — BLE provisioning (Phase 5, nice-to-have)
 ESP-IDF's `wifi_provisioning` component supports a **BLE transport** alongside SoftAP using the same
 manager, so a Web Bluetooth page or the reference phone app can deliver the same config blob — still
 paste-from-phone, no on-screen typing. Add it without rearchitecting.
@@ -639,7 +656,7 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 |---|---|---|
 | **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
-| **2 — Provisioning portal** ◀ next | Paste-from-phone setup form → NVS; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
+| **2 — Provisioning portal** ◀ next | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
 | **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server |
 | **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
@@ -692,7 +709,7 @@ path and drops off the register, downgraded to a Phase-0 verification spike.)*
 | 4 | UI library | **LVGL** via `esp_lvgl_port` — 1-bit, single partial buffer, trimmed |
 | 5 | Backend / data | **One device contract, two source apps** — "Yapp" (`yapp-server`/Todoist) + "Local" (LAN box) |
 | 6 | Transport | **Plain HTTP on LAN** for both; TLS a compile-time toggle for remote later |
-| 7 | Provisioning | **Paste-from-phone SoftAP portal** (all config in one form); carousel dropped; BLE = a Phase-2 second transport |
+| 7 | Provisioning | **Paste-from-phone SoftAP portal** via the **Setup/Wi-Fi core app** (non-removable; all config in one form); carousel dropped; BLE = a post-MVP (Phase 5) second transport |
 | 8 | OTA | **Yes — ESP-IDF native dual-slot** (`esp_https_ota`) + rollback, image from `fw_url` |
 | 9 | Settings/power | **Settings app** controls startup target, deep-sleep toggle, inactivity timeout — battery-ready scaffolding (§8A) |
 | 10 | IDF version | **v6.0.1** (installed via `eim`), pinned for reproducibility |
