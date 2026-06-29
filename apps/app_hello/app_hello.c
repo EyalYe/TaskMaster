@@ -13,17 +13,24 @@
 #include "input.h"
 #include "sh1106.h"
 #include "net_status.h"
+#include "app_store.h"
 #include "esp_log.h"
 
 #include <stdio.h>
 
 static const char *TAG = "app.hello";
-static int s_counter;
+static int          s_counter;
+static app_store_t  s_store;   /* this app's own private NVS namespace */
 
 static void hello_init(void)
 {
-    s_counter = 0;
-    ESP_LOGI(TAG, "init");
+    /* Load our own persisted variable — survives app-switch and reboot, with no
+     * core edits and no collision with device config (app_store.h). */
+    app_store_open(&s_store, "hello");
+    uint32_t saved = 0;
+    app_store_get_u32(&s_store, "count", &saved, 0);   /* default 0 on first run */
+    s_counter = (int)saved;
+    ESP_LOGI(TAG, "init (restored count=%d)", s_counter);
 }
 
 static void hello_on_event(uint8_t ev)
@@ -60,8 +67,11 @@ static void hello_render(void)
 
 static void hello_exit(void)
 {
-    /* Idempotent/total (§6A): no heap, no widgets — nothing to free. */
-    ESP_LOGI(TAG, "exit");
+    /* Persist our variable on the way out, then release the handle. Idempotent/
+     * total (§6A): no heap, no widgets — only our own NVS handle to close. */
+    app_store_set_u32(&s_store, "count", (uint32_t)s_counter);
+    app_store_close(&s_store);
+    ESP_LOGI(TAG, "exit (saved count=%d)", s_counter);
 }
 
 static const device_app_t hello_app = {

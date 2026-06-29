@@ -102,3 +102,39 @@ transition rather than just redraw, cache the previous `state` in your own struc
 Never call `esp_wifi_*` yourself — the radio is owned by core (the network task, the Setup app, and
 the Settings `WIFI_EN` toggle). The same `*_get()` + auto-re-render pattern will expose future status
 (battery, sync state) as the platform grows.
+
+## 5. Persisting your own data (`app_store.h`)
+
+Your app can create and persist its **own** variables — no core edits, no shared schema. Each app gets
+a **private NVS namespace** keyed by an id you choose:
+
+```c
+#include "app_store.h"
+
+static app_store_t store;
+
+static void my_init(void) {
+    app_store_open(&store, "myapp");              // unique id, 1..15 chars
+    uint32_t runs;
+    app_store_get_u32(&store, "runs", &runs, 0);  // default 0 on first run
+    app_store_set_u32(&store, "runs", runs + 1);  // persisted immediately
+}
+
+static void my_exit(void) {
+    app_store_close(&store);                       // release the handle
+}
+```
+
+Available types: `app_store_get/set_str`, `_u32`, and `_blob` (for a small struct). `get_*` take a
+default, so you never special-case "first run". Notes:
+
+- **Pick a stable, unique namespace** (often your app name). It's your private island — keys can't
+  collide with other apps or with device config.
+- **`tmcfg` is reserved** for core device config (`nvs_config`); `app_store_open()` rejects it.
+- **Don't touch `nvs_config.h`** — that's core-owned device config (Wi-Fi creds, tokens, settings)
+  that drives the setup form. `app_store` is your app-private tier (PLAN §9.3).
+- `app_store_erase_all(&store)` clears just your namespace (a per-app reset).
+
+Writes commit immediately, so prefer writing on real changes / in `exit()` rather than every frame
+(NVS is flash). A user-facing setting that should appear in the device **Settings** UI is a separate,
+future facility (PLAN §9.3) — `app_store` is for app-internal state, the common case.

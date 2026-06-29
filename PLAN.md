@@ -726,6 +726,29 @@ Native `nvs_flash` handles wear-leveling. **Declarative schema, not hand-wired k
 NVS read/write. Adding a future field = one row. Two write paths: provisioning form (secrets/URLs)
 and the Settings app (behavior). Optionally enable **NVS encryption** for the secret keys (§10).
 
+### 9.3 App-owned storage (`app_store.h`) — config a third-party dev *can* add
+
+The schema above is **core-owned device config**; an external app must not edit it (that would be a
+core edit / a fork, against §6.1). So app config is a **separate tier**: each app persists its own
+variables in its **own private NVS namespace**, with no core changes and no schema.
+
+```c
+static app_store_t store;
+app_store_open(&store, "pomodoro");                 // your unique id (≤15 chars)
+uint32_t mins; app_store_get_u32(&store, "work", &mins, 25);   // default 25
+app_store_set_u32(&store, "work", 30);              // persisted immediately
+```
+
+- **Isolation by namespace:** one NVS namespace per app, so app keys can't collide with each other or
+  with device config. The core namespace (`tmcfg`) is **reserved** — `app_store_open()` rejects it.
+- **No ceremony:** typed `get/set` for str / u32 / blob; `get_*` take a default so there's no
+  first-run special case. Open in `init()`, close in `exit()`.
+- **Two tiers, on purpose:** `nvs_config` = device config that drives the **setup form** (core only);
+  `app_store` = app-internal state (any app). A *future* third facility would let an app **register a
+  user-facing setting** that appears in the Settings UI — self-registered schema rows namespaced by
+  app id, mirroring app registration (§6.1). Not built yet; `app_store` covers app-private data, which
+  is the common case.
+
 ---
 
 ## 10. Security
