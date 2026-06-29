@@ -384,6 +384,13 @@ Wrap launch→Home→relaunch in a heap-trace leak cycle and assert `esp_get_min
 after Home **equals** the value before launch. Run it per app, and explicitly **fire Home mid-fetch**
 — the case that would catch any accidental cross-task reference. Clean 100× ⇒ Home teardown is sound.
 
+> **When this lands:** the harness is built and first run in **Phase 2** (§14) on a heap-poisoning
+> debug build — it was deferred out of Phase 1, whose lifecycle/Launcher were verified functionally on
+> hardware but without heap tracing. Phase 1 already satisfies its preconditions: app `exit()` is
+> total/idempotent, no app spawns its own task (§6A.2), and `app_hello` holds no heap. So the Phase-2
+> run is the *measurement* that confirms what Phase 1 built. It then stays a standing gate for every
+> app added thereafter (§17).
+
 ---
 
 ## 7. Provisioning — paste everything from your phone
@@ -632,7 +639,7 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 |---|---|---|
 | **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
-| **2 — Provisioning portal** ◀ next | Paste-from-phone setup form → NVS | Join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot |
+| **2 — Provisioning portal** ◀ next | Paste-from-phone setup form → NVS; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
 | **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server |
 | **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |

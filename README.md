@@ -92,7 +92,8 @@ Comment an entry out to disable that app (it won't compile). To disable **every*
 - [x] Inside the demo app, turning the knob changes its `COUNT`; Select/push resets it.
 - [x] **Home** returns to the Launcher from inside any app (serial: `HOME -> Launcher` + app `exit`).
 - [x] Commenting the app's manifest line (or `dependencies: {}`) removes it from the build.
-- [ ] Leak-clean teardown cycle (PLAN §6A.4) — needs a debug build with heap tracing (not yet run).
+- [ ] Leak-clean teardown cycle (PLAN §6A.4) — deferred to **Phase 2**: stood up on a heap-poisoning
+      debug build, then a standing per-app gate.
 
 ## Build status
 
