@@ -128,8 +128,16 @@ static void my_exit(void) {
 Available types: `app_store_get/set_str`, `_u32`, and `_blob` (for a small struct). `get_*` take a
 default, so you never special-case "first run". Notes:
 
-- **Pick a stable, unique namespace** (often your app name). It's your private island — keys can't
-  collide with other apps or with device config.
+- **Pick a stable, unique id** (often your app name, or a repo slug). It's your private island — keys
+  can't collide with other apps or with device config.
+- **Ids can be any length.** NVS caps a namespace at **15 chars**: ids of 1..15 chars are used
+  verbatim; longer ids are **hashed** (64-bit FNV-1a → base36) to a 15-char namespace automatically.
+  **Keys** are always limited to **15 chars** by NVS.
+- **Collision — be aware (it's an off-chance, not a real risk):** two *distinct* ids mapping to the
+  same namespace is astronomically unlikely (64-bit hash), but not impossible — a short literal id
+  could coincide with another id's hash, or two long ids could hash alike. If that ever happened, the
+  two apps would share a namespace and could read/overwrite each other's keys. **Choosing a
+  distinctive id makes this a non-issue.**
 - **`tmcfg` is reserved** for core device config (`nvs_config`); `app_store_open()` rejects it.
 - **Don't touch `nvs_config.h`** — that's core-owned device config (Wi-Fi creds, tokens, settings)
   that drives the setup form. `app_store` is your app-private tier (PLAN §9.3).

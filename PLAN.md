@@ -734,13 +734,20 @@ variables in its **own private NVS namespace**, with no core changes and no sche
 
 ```c
 static app_store_t store;
-app_store_open(&store, "pomodoro");                 // your unique id (≤15 chars)
+app_store_open(&store, "pomodoro");                 // your unique id (any length)
 uint32_t mins; app_store_get_u32(&store, "work", &mins, 25);   // default 25
 app_store_set_u32(&store, "work", 30);              // persisted immediately
 ```
 
 - **Isolation by namespace:** one NVS namespace per app, so app keys can't collide with each other or
   with device config. The core namespace (`tmcfg`) is **reserved** — `app_store_open()` rejects it.
+- **Any-length ids:** NVS caps a namespace at 15 chars, so ids of 1..15 chars are used verbatim and
+  **longer ids are hashed** (64-bit FNV-1a → base36) to a 15-char namespace automatically. Keys stay
+  ≤15 chars (NVS limit).
+- **Collision (documented for awareness):** distinct ids almost never map to the same namespace, but
+  it's *theoretically* possible (a short literal equal to another id's hash, or two long ids hashing
+  alike — a 64-bit space, astronomically unlikely). If it ever happened the two apps would share a
+  namespace; **pick a distinctive id** and it's a non-issue.
 - **No ceremony:** typed `get/set` for str / u32 / blob; `get_*` take a default so there's no
   first-run special case. Open in `init()`, close in `exit()`.
 - **Two tiers, on purpose:** `nvs_config` = device config that drives the **setup form** (core only);

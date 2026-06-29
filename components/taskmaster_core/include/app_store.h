@@ -7,13 +7,24 @@
  * to nvs_config.h (which is core-owned device config that drives the setup form).
  *
  *     static app_store_t store;
- *     app_store_open(&store, "pomodoro");                  // your unique id (≤15 chars)
+ *     app_store_open(&store, "pomodoro");                  // your id (any length)
  *     uint32_t mins; app_store_get_u32(&store, "work", &mins, 25);   // default 25
  *     app_store_set_u32(&store, "work", 30);               // persisted immediately
  *
  * Open once in init(); the handle is cheap to keep. There is no schema and no form
  * integration — this is app-internal state. (User-facing settings that should appear
- * in the Settings UI are a separate, future facility; see PLAN §9.2.)
+ * in the Settings UI are a separate, future facility; see PLAN §9.3.)
+ *
+ * Namespace ids: NVS caps a namespace at 15 chars. Ids of 1..15 chars are used
+ * verbatim (human-readable); longer ids (e.g. a repo slug) are hashed down to a
+ * 15-char namespace automatically — so you can pass any length. Keys are always
+ * limited to 15 chars by NVS.
+ *
+ * Collision note: distinct ids almost never map to the same namespace, but it is
+ * *theoretically* possible — a literal short id could equal another id's hash, or
+ * two long ids could hash alike (a 64-bit hash; astronomically unlikely). If it ever
+ * happened, the two apps would share one namespace and could read/overwrite each
+ * other's keys. Pick a distinctive id to make this a non-issue.
  */
 #pragma once
 
@@ -27,9 +38,10 @@ typedef struct {
     bool     open;
 } app_store_t;
 
-/* Open your app's private namespace. `ns` must be a stable, unique id of 1..15
- * chars; the core namespace is reserved and rejected. Call once (e.g. in init()). */
-esp_err_t app_store_open(app_store_t *st, const char *ns);
+/* Open your app's private namespace. `id` is a stable, unique id of any length
+ * (1..15 chars used verbatim; longer ids are hashed to a 15-char namespace). The
+ * core namespace is reserved and rejected. Call once (e.g. in init()). */
+esp_err_t app_store_open(app_store_t *st, const char *id);
 void      app_store_close(app_store_t *st);
 
 /* Typed get/set. set_* persist immediately. get_* return `def` when the key is

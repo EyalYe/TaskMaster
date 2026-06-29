@@ -17,16 +17,49 @@ static const char *TAG = "app_store";
 /* Reserved: the core device-config namespace (nvs_config.c). Off-limits to apps. */
 #define CORE_NS "tmcfg"
 
-esp_err_t app_store_open(app_store_t *st, const char *ns)
+/* Hash a too-long id into a deterministic ≤15-char NVS namespace: 64-bit FNV-1a
+ * encoded base36. 2^64 in base36 needs 13 digits, so this always fits. */
+static void hash_namespace(const char *id, char out[16])
 {
-    if (st == NULL || ns == NULL) {
+    uint64_t h = 1469598103934665603ULL;          /* FNV-1a offset basis */
+    for (const unsigned char *p = (const unsigned char *)id; *p; p++) {
+        h ^= *p;
+        h *= 1099511628211ULL;                     /* FNV-1a prime */
+    }
+    static const char d[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    char tmp[16];
+    int i = 0;
+    do {
+        tmp[i++] = d[h % 36];
+        h /= 36;
+    } while (h > 0 && i < 15);
+    int j = 0;
+    while (i > 0) {
+        out[j++] = tmp[--i];                       /* reverse */
+    }
+    out[j] = '\0';
+}
+
+esp_err_t app_store_open(app_store_t *st, const char *id)
+{
+    if (st == NULL || id == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    size_t n = strlen(ns);
-    if (n == 0 || n > 15) {                 /* NVS namespace length limit */
-        ESP_LOGE(TAG, "bad namespace '%s' (must be 1..15 chars)", ns);
+    size_t n = strlen(id);
+    if (n == 0) {
+        ESP_LOGE(TAG, "empty namespace id");
         return ESP_ERR_INVALID_ARG;
     }
+
+    /* ≤15 chars: use verbatim (human-readable). Longer: hash to a 15-char ns. */
+    char ns[16];
+    if (n <= 15) {
+        memcpy(ns, id, n + 1);
+    } else {
+        hash_namespace(id, ns);
+        ESP_LOGD(TAG, "id '%s' -> hashed namespace '%s'", id, ns);
+    }
+
     if (strcmp(ns, CORE_NS) == 0) {
         ESP_LOGE(TAG, "namespace '%s' is reserved for device config", ns);
         return ESP_ERR_INVALID_ARG;
