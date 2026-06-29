@@ -79,8 +79,8 @@ Three buttons, two roles:
 |---|---|---|
 | MCU | Seeed XIAO ESP32-C3 | Single-core RISC-V, 400KB SRAM, 4MB flash, ext. antenna connector |
 | Display | 1.3" OLED 128×64 | **SH1106** — `esp_lcd` panel driver (or registry SH1106 component); **2-px column offset** (the #1 blank/garbled-screen cause) |
-| Rotary input | EC11 encoder + switch | 20 detents/rev; A/B + SW = 3 GPIO; push = app-usable. ESP-IDF `knob` component |
-| Buttons | 2× tactile momentary | **Select** (app-usable) + **Home** (OS-reserved); internal pull-ups; ESP-IDF `button` component |
+| Rotary input | EC11 encoder + switch | 20 detents/rev; A/B + SW = 3 GPIO; push = app-usable. Hand-rolled Ben-Buxton GPIO decode (C3 has no PCNT, §4.3) |
+| Buttons | 2× tactile momentary | **Select** (app-usable) + **Home** (OS-reserved); internal pull-ups; sample-debounced GPIO read (§4.3) |
 | Enclosure | 3D-printed, 15–20° wedge | Exposes screen, knob, 2 buttons only |
 
 **Pin budget:** OLED (SDA/SCL = 2), encoder (A/B/SW = 3), buttons (2) = **7 GPIO** + power. XIAO
@@ -96,7 +96,7 @@ LVGL trim, HTTP-on-LAN default). If it ever bites, the pin-compatible **XIAO ESP
 ## 4. Firmware & Software Architecture (ESP-IDF / FreeRTOS)
 
 ESP-IDF gives us FreeRTOS, a managed-component dependency system, native Wi-Fi/SoftAP/HTTP/OTA/NVS,
-and official LVGL + `knob`/`button` components. Peripherals are configured in code + `menuconfig`
+and official LVGL (adopted Phase 3, §4.4). Input is a hand-rolled GPIO decoder (§4.3). Peripherals are configured in code + `menuconfig`
 (Kconfig), with a single board-pins header keeping wiring out of business logic.
 
 ### 4.1 Direct HTTPS to Todoist is the hardest part, not the display
@@ -111,11 +111,19 @@ wastes CPU/bus and risks OLED wear. **Render only when state changes** (input ev
 plus a timed tick *only* while an animation is active (horizontal text scroll). LVGL's
 `lv_timer_handler` is pumped on events, not free-run.
 
-### 4.3 Input via ESP-IDF `knob` + `button` components
-Espressif publishes managed components for exactly our hardware: **`knob`** (rotary encoder via
-PCNT/GPIO) and **`button`** (debounce, click/long-press events). They emit callbacks; an input task
-translates those into our `EV_*` enums and posts them to a FreeRTOS queue. No hand-rolled IRQ
-debounce. (Home is tagged specially — see §4.6/§5.2.)
+### 4.3 Input — hand-rolled GPIO decoder on the C3 (decided)
+**The C3 has no PCNT**, so the Espressif `knob` component's headline feature — zero-CPU hardware
+quadrature decoding — is unavailable; it would fall back to GPIO anyway. We therefore use a
+**hand-rolled Ben-Buxton quadrature state machine** for the encoder and a **sample-debounced reader**
+for the buttons (`input.c`), polled by a 1 ms input task that translates edges into our `EV_*` enums
+and posts them to a FreeRTOS queue. Tiny, dependency-free, and tunable in code. (Home is tagged
+specially — see §4.6/§5.2.)
+
+> **Deferred reevaluation (Phase 4, battery):** the 1 ms poll prevents light sleep, so the battery
+> phase converts input to **interrupt / GPIO-wake driven** regardless of library. At that point we
+> reevaluate the managed **`button`** component specifically — its wake-source support and free
+> long-press/double-click semantics finally justify the dependency. The `EV_*` queue is the
+> abstraction boundary, so swapping the input source touches nothing above the input task.
 
 ### 4.4 UI library: LVGL (decided)
 **LVGL** via the official `esp_lvgl_port` component, on the SH1106 panel through `esp_lcd`. Cost is
@@ -127,6 +135,11 @@ real on 400KB SRAM + Wi-Fi, so budget for it:
   Task Manager use. Watch the OTA-partition budget (§9).
 - Keep the app framework's `render()` contract drawing-library-agnostic so a perf-critical screen
   could drop to raw `esp_lcd` later.
+
+> **Adoption timing (decided):** LVGL is **deferred to Phase 3** (Task Manager). The **Phase 1
+> Launcher renders on the existing raw `sh1106` text renderer** — this proves the app framework and
+> clean app-switch first, and moves the LVGL/SRAM-budget risk to where there's real UI to justify it.
+> Because `render()` is library-agnostic, the Launcher's raw renderer and a later LVGL app coexist.
 
 ### 4.5 Provisioning is now a solved path (the big win of moving to ESP-IDF)
 SoftAP + `esp_http_server` + a DNS captive portal are **mature, heavily-used ESP-IDF features**, and
@@ -141,8 +154,8 @@ apps directly. Shared task model written only by the network task under a mutex,
 
 | Task | FreeRTOS prio | Role |
 |---|---|---|
-| Input handler | High (e.g. 10) | Receives `knob`/`button` callbacks → `EV_*`. **Home → posts "go home" to the UI task; never dispatched to the app.** Others post to the active app via the UI-task queue |
-| Render / UI | Medium (e.g. 5) | Owns the active-app pointer; runs `render()` on demand + animation tick; pushes frame via `esp_lcd` |
+| Input handler | High (e.g. 10) | 1 ms poll: Ben-Buxton encoder decode + button debounce → `EV_*` (§4.3). **Home → posts "go home" to the UI task; never dispatched to the app.** Others post to the active app via the UI-task queue |
+| Render / UI | Medium (e.g. 5) | Owns the active-app pointer; runs `render()` on demand + animation tick; pushes frame (raw `sh1106` now, `esp_lcd`/LVGL in Phase 3) |
 | Network | Low (e.g. 3) | Wi-Fi connect, sync (~5 min) via `esp_http_client`; writes the shared task model under a mutex |
 
 Wi-Fi/IP lifecycle runs on ESP-IDF's `esp_event` loop, feeding the network task.
@@ -154,8 +167,9 @@ Wi-Fi/IP lifecycle runs on ESP-IDF's `esp_event` loop, feeding the network task.
 ### 5.1 Peripheral & component bring-up
 - **I2C** via the new `i2c_master` driver @ 400kHz → `esp_lcd` SH1106 panel (set the **2-px column
   offset** + segment remap; this is the #1 "blank screen" cause).
-- **`knob`** component → encoder A/B (+ SW handled as a button). **`button`** component → encoder SW,
-  Select, Home (internal pull-ups, native debounce, click/long-press).
+- **Hand-rolled GPIO input** (§4.3): Ben-Buxton decode on encoder A/B; sample-debounced reader on
+  encoder SW, Select, Home (internal pull-ups). 1 ms poll task → `EV_*`. (C3 has no PCNT; managed
+  `knob`/`button` reevaluated at the battery phase.)
 - A single `board_pins.h` holds GPIO assignments — the one place wiring is described.
 
 ### 5.2 Shared state & ownership (the rule that prevents most bugs)
@@ -166,6 +180,10 @@ Wi-Fi/IP lifecycle runs on ESP-IDF's `esp_event` loop, feeding the network task.
   (queue items), never direct pointer writes from other tasks.
 - **Home button** handled at this boundary: on a "go home" message the UI task runs the current
   app's `exit()` and switches to the Launcher. Apps never see Home — a guaranteed escape hatch.
+  Because Home can arrive at *any* point (mid-render, mid-fetch, even mid-`init`), `exit()` must be
+  **idempotent and total**: free everything `init()` *could* have allocated regardless of how far it
+  got, null-out as it goes (and, once LVGL lands in Phase 3, free the widget tree in one screen-delete
+  — Phase-1 raw-rendered apps allocate no widgets). See §6A for the full discipline.
 - Network → UI "data changed" wakeup via a **FreeRTOS task notification** so render reacts
   immediately (ties into §4.2 on-demand render).
 
@@ -318,6 +336,53 @@ hints change (fits the on-demand render model, §4.2).
   - (Room to grow: brightness, sync interval — same settings-schema pattern.)
   Each setting persists to NVS immediately on change (§9).
 - **App 5 — Pomodoro (Phase 2):** proves the framework for third-party devs (no network needed).
+
+---
+
+## 6A. Memory safety & leak discipline
+
+On a 400KB device with no MMU, a leak or stray write doesn't throw — it starves the heap or silently
+corrupts a neighbor and reboots days later. The rules below are *constraints Phase 1 is built
+against*, not a retrofit. They assume — and do not restate — the ownership model (§5.2) and the
+UI-task-only, cooperative `init`/`exit` lifecycle (§6), which already remove the worst class of
+race-on-teardown by construction.
+
+### 6A.1 Make leaks structurally impossible (the big lever)
+- **Bounded over dynamic.** Task data lives in a fixed `task_t tasks[TASKMASTER_MAX_TASKS]` (core-owned,
+  §5.2), never a growing list. The network task parses *into* that array, then frees the cJSON tree
+  immediately. **No per-task `malloc`.**
+- **No per-widget allocation (Phase 1) → widgets owned by the app's screen (Phase 3+).** While the
+  Launcher renders on the raw `sh1106` text renderer (§4.4), apps allocate **no** UI objects, so
+  `exit()` has no widget tree to free at all. Once LVGL lands (Phase 3), every app parents its widgets
+  to its own screen object and `exit()` deletes/cleans that screen (`lv_obj_clean`) to free the whole
+  tree in one call — you never track individual widgets, so you can't leak one and `exit()` stays
+  trivially total (§5.2).
+- **Stream, don't accumulate.** The HTTPS client parses into the fixed struct as bytes arrive, reusing
+  one buffer — it never concatenates a whole Todoist/LAN-box body into a heap string.
+- **One owner per allocation, documented.** Allocations that cross a function boundary are the ones
+  that rot; the `device_app_t` contract states who frees what.
+
+### 6A.2 No app-owned worker tasks (a prohibition, not a procedure)
+The model is **one shared, always-on network task** that owns the task model (§5.2) — *not* per-app
+workers. Apps therefore **must not spawn their own tasks.** This designs out the in-flight-fetch
+use-after-free entirely: on Home the app's widgets are freed while the model persists (core-owned,
+mutex-guarded), so nothing writes into freed memory. If a future app ever needs background work, it
+becomes a core service, not an app-owned task.
+
+### 6A.3 Tooling — all built into ESP-IDF, debug builds only
+- **Heap poisoning:** `CONFIG_HEAP_POISONING_COMPREHENSIVE` — canaries catch overflow, use-after-free,
+  double-free at runtime.
+- **Leak tracing:** `heap_trace_start(HEAP_TRACE_LEAKS)` / `heap_trace_dump()` around one
+  launch→Home→relaunch cycle prints exactly what wasn't freed.
+- **Stack overflow trap:** `CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK`, plus per-task
+  `uxTaskGetStackHighWaterMark()` to size stacks from data (§13 soak).
+- **Static:** `-Wall -Wextra` and `idf.py clang-check`. Pure-logic code (JSON→struct mapping, encoder
+  state machine) is unit-tested on the host `linux` target, where ASan/LeakSan actually run.
+
+### 6A.4 The test that proves Home is leak-safe
+Wrap launch→Home→relaunch in a heap-trace leak cycle and assert `esp_get_minimum_free_heap_size()`
+after Home **equals** the value before launch. Run it per app, and explicitly **fire Home mid-fetch**
+— the case that would catch any accidental cross-task reference. Clean 100× ⇒ Home teardown is sound.
 
 ---
 
@@ -511,9 +576,9 @@ TaskMaster/                          ← firmware (config) repo
 │  └─ taskmaster_core/               ← the OS component (see §6.1)
 │     ├─ include/                    ←   public app API: app.h (device_app_t), app_manager.h, ui_hints.h
 │     ├─ app_manager.c  launcher.c   ←   registry + lifecycle + Launcher
-│     ├─ ui/   input/   net/         ←   display(esp_lcd SH1106 + esp_lvgl_port), knob/button, contract client
+│     ├─ ui/   input/   net/         ←   display(sh1106 now; esp_lcd+lvgl Phase 3), GPIO input decoder, contract client
 │     ├─ storage/  power/  provisioning/
-│     └─ idf_component.yml           ←   core's own managed deps (lvgl, knob, button, esp_lcd panel)
+│     └─ idf_component.yml           ←   core's own managed deps (lvgl + esp_lcd panel — Phase 3)
 ├─ apps/                             ← NOT auto-discovered → presence is controlled by the manifest
 │  ├─ app_tasks/                     ← first-party app component (could equally be its own repo)
 │  │  ├─ app_tasks.c  (TASKMASTER_REGISTER_APP)
@@ -543,13 +608,14 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 - Build: `idf.py build`  ·  Flash + serial: `idf.py -p <PORT> flash monitor`  ·
   Set target (once): `idf.py set-target esp32c3`.
 - Config: `idf.py menuconfig` → baked into `sdkconfig.defaults`.
-- Managed deps (LVGL, `knob`, `button`, SH1106 `esp_lcd` panel) pinned via `idf_component.yml`.
+- Managed deps (LVGL + SH1106 `esp_lcd` panel — Phase 3) pinned via `idf_component.yml`. Input is
+  hand-rolled GPIO (§4.3), no input-component dep.
 
 ---
 
 ## 13. Test & Validation Strategy
-- **Per-driver bring-up first:** tiny standalone test apps for (a) OLED "hello", (b) `knob` count to
-  serial, (c) `button` events to serial — before any app logic. The SH1106 column offset and encoder
+- **Per-driver bring-up first:** tiny standalone test apps for (a) OLED "hello", (b) encoder count to
+  serial, (c) button events to serial — before any app logic. The SH1106 column offset and encoder
   steps are the two most common silent failures.
 - **Unit tests (`Unity`, ESP-IDF's framework):** app-manager state machine, JSON→task-model parsing
   (cJSON), provisioning form-body parser, config-schema↔NVS round-trip. Run host-side where possible
@@ -565,15 +631,26 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 
 | Phase | Goal | Exit criteria |
 |---|---|---|
-| **0 — Bring-up + spike** | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; `knob`/`button` register; **a phone loads a page served by the device over SoftAP** |
-| **1 — Core OS** | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); FreeRTOS tasks + app_manager + Launcher | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races) |
+| **0 — Bring-up + spike** | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
+| **1 — Core OS** | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
 | **2 — Provisioning portal** | Paste-from-phone setup form → NVS | Join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot |
 | **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server |
-| **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle |
+| **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + Phase 2** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; Phase-2 items as separate increments |
 
 Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP.
+
+> **⚠ Phase 4 — input must go interrupt-driven (don't forget).** The Phase-1 input path is a **1 ms
+> poll** (§4.3), chosen because Phase 1 is mains-powered. That poll **prevents the system from ever
+> reaching light sleep** — a task waking every 1 ms (atop the 1000 Hz tick) blocks ESP-IDF's tickless
+> idle (`CONFIG_FREERTOS_USE_TICKLESS_IDLE`), forfeiting the ~hundreds-of-µA light-sleep tier before
+> deep sleep is even considered. So Phase 4 **must** convert input to **GPIO-interrupt / wake-source
+> driven**: encoder A/B + buttons as GPIO interrupts; deep-sleep wake on a button / encoder push (not
+> every rotation edge). The Ben-Buxton decode table ports unchanged — only the *trigger* (poll → ISR)
+> changes, so no decode logic is lost. Design this **together with the §8A sleep-state machine** (which
+> states exist, what wakes from each), not in isolation. Optionally reevaluate the managed `button`
+> component here for its built-in wake-source + long-press support.
 
 ---
 
@@ -586,7 +663,7 @@ Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP.
 | Wrong SH1106 column offset → blank/garbled screen | Med | Low | Phase-0 driver bring-up; set the 2-px offset |
 | Task races on active-app / shared model | Med | High | Strict ownership (§5.2); single mutex; app switch on the UI task only |
 | App image overflows ~1.9MB OTA slot | Low | Med | Kconfig-trim LVGL; track image size in CI; drop unused features |
-| Encoder missed steps at speed | Low | Low | `knob` component on PCNT; tune steps-per-detent |
+| Encoder missed steps at speed | Low | Low | Hand-rolled Ben-Buxton state machine (C3 has no PCNT, §4.3); 1 ms poll; tune steps-per-detent |
 | ESP32-only lock-in (left Zephyr's portability) | Low | Low | Accepted — committed to Espressif silicon; `device_app_t` + the REST contract stay portable concepts |
 
 *(Note: SoftAP/HTTP/captive-portal — formerly the top risk on Zephyr — is now a supported ESP-IDF
@@ -625,6 +702,8 @@ No open decisions remain — the plan is build-ready.
       real Wi-Fi + sync state.
 - [ ] Select completes the highlighted task; Postpone (submenu) reschedules; both reflect on next sync.
 - [ ] **Home returns to the Launcher from anywhere**, even mid-action, never swallowed by an app.
+- [ ] **Leak-clean teardown:** a launch→Home→relaunch heap-trace cycle (incl. Home fired mid-fetch)
+      restores `min_free_heap` to its pre-launch value across 100 iterations, per app (§6A.4).
 - [ ] The contextual **hint strip** shows the current control labels and updates when an app changes
       mode (e.g. Task Manager list view → detail submenu).
 - [ ] Settings changes (startup target, timeout, deep-sleep toggle) persist and take effect.
