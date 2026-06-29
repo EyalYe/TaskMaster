@@ -592,10 +592,9 @@ TaskMaster/                          ← firmware (config) repo
 External/third-party apps live in **their own repos** and are pulled by a `git:` line in
 `main/idf_component.yml` (or `EXTRA_COMPONENT_DIRS` for local dev) — nothing else changes.
 
-> **Phase 0 note:** the current bring-up code is still flat under `main/` (`sh1106.c`, `input.c`,
-> `softap_portal.c`). The refactor into `taskmaster_core` + app components above is the **Phase 1**
-> first task — it's what makes the manifest-driven app model real. Until then there are no app
-> components yet.
+> **Status (Phase 1 complete):** the refactor above is **done** — platform services and the app
+> framework live in `components/taskmaster_core/`, and `apps/app_hello/` is the first self-registering
+> app component, listed in `main/idf_component.yml`. `main/` is now a thin composition root.
 
 ---
 
@@ -631,15 +630,20 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 
 | Phase | Goal | Exit criteria |
 |---|---|---|
-| **0 — Bring-up + spike** | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
-| **1 — Core OS** | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
-| **2 — Provisioning portal** | Paste-from-phone setup form → NVS | Join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot |
+| **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
+| **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
+| **2 — Provisioning portal** ◀ next | Paste-from-phone setup form → NVS | Join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot |
 | **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server |
 | **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + Phase 2** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; Phase-2 items as separate increments |
 
 Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP.
+
+> **Current state (2026-06-30):** Phases 0–1 complete and **verified on hardware** (XIAO ESP32-C3) —
+> builds clean on ESP-IDF v6.0.1 (app ≈ 876 KB, 55% free in the OTA slot); boot enumerates the
+> registered app, the Launcher renders, and enter-app → input → **Home** teardown was confirmed
+> over serial on-device (clean `init`/`exit` each cycle). **Phase 2 (provisioning portal) is next.**
 
 > **⚠ Phase 4 — input must go interrupt-driven (don't forget).** The Phase-1 input path is a **1 ms
 > poll** (§4.3), chosen because Phase 1 is mains-powered. That poll **prevents the system from ever
