@@ -173,7 +173,9 @@ Wi-Fi/IP lifecycle runs on ESP-IDF's `esp_event` loop, feeding the network task.
 
 ## 6. Application Framework
 
-Polymorphic-in-C via an explicit interface; apps register in a static table.
+Polymorphic-in-C via an explicit interface. Each app is a **self-contained ESP-IDF component** (its
+own directory, optionally its own git repo) that **self-registers** with the core — so the set of
+apps on a build is composed from one editable manifest, with **no edits to core** and no fork (§6.1).
 
 ```c
 typedef struct {
@@ -190,6 +192,84 @@ typedef struct {
 only*. `render()` must not block on network/I2C beyond the frame push. Apps read the shared task
 model through a provided accessor that handles locking — apps never touch the mutex directly.
 `app_manager_switch_to(i)` calls current `exit()`, then next `init()`, atomically on the UI task.
+
+### 6.1 App architecture — apps as self-registering components
+
+**Requirement:** a developer can build an app in a **separate repo** and add/remove it from a device
+build by editing **one manifest line** — no forking, no edits to core, and a disabled app is not
+compiled. This rules out a core-owned `#ifdef`/`g_apps[]` table (an external repo can't be reached by
+a core header, and a hardcoded table would force a core edit per app = a fork by another name). The
+model is therefore **self-registration + an editable manifest**.
+
+**Three roles (clean separation of ownership):**
+
+```
+ ┌────────────────────────┐   stable, versioned app API   ┌──────────────────────────┐
+ │  taskmaster_core        │◄──────────────────────────────│  app component (per app) │
+ │  (ESP-IDF component)    │   device_app_t                │  own dir / own git repo  │
+ │  - device_app_t         │   app_manager_register()      │  REQUIRES taskmaster_core│
+ │  - app_manager registry │   ui_set_hints() (§6 hints)   │  TASKMASTER_REGISTER_APP │
+ │  - UI / input / net /   │                               └──────────────────────────┘
+ │    storage / launcher   │                                         ▲  (many)
+ └────────────────────────┘                                         │
+            ▲   iterates registry at runtime                         │ listed in
+            │                                                        │
+ ┌──────────┴───────────────────────────────────────────────────────┴──────────┐
+ │  firmware (config) repo:  main/ + partitions + sdkconfig + THE MANIFEST       │
+ │  main/idf_component.yml  ← the editable app list (one line per app)           │
+ └──────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **`taskmaster_core`** — the OS as one component: the `device_app_t` interface, `app_manager`
+  (registry + lifecycle), UI/input/net/storage, Launcher. Exposes the **stable, versioned app API**
+  (`device_app_t`, `app_manager_register()`, the hint API). The only thing an app depends on.
+- **App component** — one per app, its own directory and (optionally) its own git repo.
+  `REQUIRES taskmaster_core`, implements `device_app_t`, and **self-registers** — core never
+  references the app by name.
+- **Firmware/config repo** — the thin top-level project that picks which apps ship, via the manifest.
+
+**Self-registration** (core stays oblivious to every app):
+```c
+// provided by taskmaster_core
+#define TASKMASTER_REGISTER_APP(app) \
+    static void __attribute__((constructor)) _tm_reg_##app(void) { \
+        app_manager_register(&app); \
+    }
+```
+```c
+// app_pomodoro component
+static const device_app_t pomodoro = { .name="Pomodoro", .init=.., .on_event=.., .render=.., .exit=.. };
+TASKMASTER_REGISTER_APP(pomodoro);
+```
+The app component pins its registration against `--gc-sections` with
+`idf_component_register(... WHOLE_ARCHIVE)` (or a `linker.lf` `KEEP`). At boot the constructors call
+`app_manager_register()`; the Launcher iterates the registry in registration order.
+
+**The editable list = `main/idf_component.yml`** (the developer-facing knob):
+```yaml
+# main/idf_component.yml — paths are relative to main/; core is auto-discovered in components/
+dependencies:
+  # ── apps: comment a line to remove that app (not built, not linked, not shown) ──
+  app_tasks:    { path: ../apps/app_tasks }               # in-tree app
+  app_settings: { path: ../apps/app_settings }
+  app_clock:    { git: https://github.com/somedev/tm-clock.git, version: v0.2.0 }   # external repo
+  # app_pomodoro: { git: https://github.com/you/tm-pomodoro.git }                   # disabled
+```
+- **Add an app** — one line: a local `path:` or a `git:` URL to the app's own repo. The ESP-IDF
+  Component Manager fetches/builds it, it self-registers, it appears in the Launcher.
+- **Remove an app** — comment the line. Not fetched, not compiled, not registered (the strongest
+  form of "not built").
+- **Order** — registration order = Launcher order (the Launcher can also sort by `name`).
+- **Local dev** — point `EXTRA_COMPONENT_DIRS` at a sibling checkout while iterating, no manifest churn.
+
+**Boundary contract:** `device_app_t` + `app_manager_register()` + the hint API form the **versioned
+app API**; an app component declares a compatible `taskmaster_core` version in its manifest. Keeping
+this boundary the single dependency is what makes a separate-repo app a one-line add.
+
+> **Deferred polish (not now):** publishing `taskmaster_core` + first-party apps to the ESP-IDF
+> component registry, semantic-versioning the API, and a GitHub-Actions build that emits a flashable
+> `.bin` from a config repo (ZMK-config style). The mechanism above already enables separate-repo
+> apps today via local `path:` or `git:` deps; these only add distribution polish.
 
 ### Contextual control hints (system-drawn hint strip)
 *(Inspired by CrossPoint Reader's contextual button labels.)* The OS owns a thin **hint strip** along
@@ -414,28 +494,43 @@ and the Settings app (behavior). Optionally enable **NVS encryption** for the se
 
 ## 11. Repository Layout (ESP-IDF)
 
+Target structure — a thin firmware project + a reusable **`taskmaster_core`** component + **one
+component per app** (§6.1). Apps are added/removed in `main/idf_component.yml`.
+
 ```
-TaskMaster/
+TaskMaster/                          ← firmware (config) repo
 ├─ PLAN.md
-├─ sdkconfig.defaults      ← Kconfig: Wi-Fi, esp_http_server, OTA, PM, LVGL trim, partition table
-├─ partitions.csv          ← nvs / otadata / phy / ota_0 / ota_1
+├─ sdkconfig.defaults                ← Kconfig: Wi-Fi, esp_http_server, OTA, PM, LVGL trim, partitions
+├─ partitions.csv                    ← nvs / otadata / phy / ota_0 / ota_1
 ├─ CMakeLists.txt
 ├─ main/
-│  ├─ main.c               ← app_main: nvs init, tasks, event loop bring-up
-│  ├─ board_pins.h         ← the one place GPIO wiring lives
-│  ├─ app_framework/       ← device_app_t, app_manager, launcher
-│  ├─ apps/                ← task_manager.c (shared by Yapp+Local), provisioning_web.c, settings.c, (pomodoro.c)
-│  ├─ net/                 ← wifi.c, softap_portal.c (esp_http_server + DNS), sync.c (contract client), ota.c
-│  ├─ storage/             ← nvs.c, config_schema.c (declarative key table → form + NVS)
-│  ├─ power/               ← idle_timeout.c, sleep.c (esp_pm / esp_sleep, wake sources)
-│  └─ ui/                  ← display.c (esp_lcd SH1106 + esp_lvgl_port), lv_conf.h, widgets.c, hint_strip.c
-├─ components/             ← pinned managed components (lvgl, knob, button, esp_lcd panel)
+│  ├─ main.c                         ← app_main: nvs/tasks/event-loop bring-up, hand off to app_manager
+│  ├─ board_pins.h                   ← the one place GPIO wiring lives
+│  └─ idf_component.yml              ← THE APP MANIFEST (taskmaster_core + one line per app)
+├─ components/                       ← auto-discovered by ESP-IDF (always in the build)
+│  └─ taskmaster_core/               ← the OS component (see §6.1)
+│     ├─ include/                    ←   public app API: app.h (device_app_t), app_manager.h, ui_hints.h
+│     ├─ app_manager.c  launcher.c   ←   registry + lifecycle + Launcher
+│     ├─ ui/   input/   net/         ←   display(esp_lcd SH1106 + esp_lvgl_port), knob/button, contract client
+│     ├─ storage/  power/  provisioning/
+│     └─ idf_component.yml           ←   core's own managed deps (lvgl, knob, button, esp_lcd panel)
+├─ apps/                             ← NOT auto-discovered → presence is controlled by the manifest
+│  ├─ app_tasks/                     ← first-party app component (could equally be its own repo)
+│  │  ├─ app_tasks.c  (TASKMASTER_REGISTER_APP)
+│  │  └─ CMakeLists.txt (REQUIRES taskmaster_core, WHOLE_ARCHIVE)
+│  ├─ app_settings/                  ← …
+│  └─ app_pomodoro/                  ← …
 ├─ proxy/
-│  └─ yapp_server/         ← contract impl over Todoist (reuses ~/yapp-cli code)
-└─ docs/                   ← wiring diagram, panel notes, device REST contract, dev setup
+│  └─ yapp_server/                   ← contract impl over Todoist (reuses ~/yapp-cli code)
+└─ docs/                             ← wiring diagram, panel notes, device REST contract, dev setup
 ```
-*(Managed deps — `lvgl/lvgl`, `espressif/knob`, `espressif/button`, the SH1106 `esp_lcd` panel — are
-pinned via `idf_component.yml`.)*
+External/third-party apps live in **their own repos** and are pulled by a `git:` line in
+`main/idf_component.yml` (or `EXTRA_COMPONENT_DIRS` for local dev) — nothing else changes.
+
+> **Phase 0 note:** the current bring-up code is still flat under `main/` (`sh1106.c`, `input.c`,
+> `softap_portal.c`). The refactor into `taskmaster_core` + app components above is the **Phase 1**
+> first task — it's what makes the manifest-driven app model real. Until then there are no app
+> components yet.
 
 ---
 
@@ -471,7 +566,7 @@ pinned via `idf_component.yml`.)*
 | Phase | Goal | Exit criteria |
 |---|---|---|
 | **0 — Bring-up + spike** | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; `knob`/`button` register; **a phone loads a page served by the device over SoftAP** |
-| **1 — Core OS** | FreeRTOS tasks + app framework + Launcher | Launcher lists apps, encoder navigates, app switch is clean (no races) |
+| **1 — Core OS** | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); FreeRTOS tasks + app_manager + Launcher | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races) |
 | **2 — Provisioning portal** | Paste-from-phone setup form → NVS | Join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot |
 | **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server |
 | **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle |
@@ -513,6 +608,7 @@ path and drops off the register, downgraded to a Phase-0 verification spike.)*
 | 8 | OTA | **Yes — ESP-IDF native dual-slot** (`esp_https_ota`) + rollback, image from `fw_url` |
 | 9 | Settings/power | **Settings app** controls startup target, deep-sleep toggle, inactivity timeout — battery-ready scaffolding (§8A) |
 | 10 | IDF version | **v6.0.1** (installed via `eim`), pinned for reproducibility |
+| 11 | App model | **Self-registering app components + editable manifest** (§6.1): apps are ESP-IDF components (own dir/repo), added/removed by a line in `main/idf_component.yml`, no core edits, disabled = not compiled. Full registry-publish/CI polish deferred |
 
 No open decisions remain — the plan is build-ready.
 
