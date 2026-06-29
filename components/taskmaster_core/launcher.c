@@ -11,6 +11,7 @@
 
 #include "app_manager.h"
 #include "task_model.h"
+#include "net_status.h"
 #include "sh1106.h"
 
 #include <stdio.h>
@@ -55,11 +56,13 @@ void launcher_render(void)
         }
     }
 
+    net_status_t ns;
+    net_status_get(&ns);
     task_status_t st;
     task_model_get(&st);
     char bar[24];
-    snprintf(bar, sizeof(bar), "WIFI:%s SYNC:%s",
-             st.wifi_rssi ? "ON" : "--", sync_state_label(st.sync));
+    snprintf(bar, sizeof(bar), "NET:%s SYNC:%s",
+             net_state_str(ns.state), sync_state_label(st.sync));
     sh1106_text_line(6, bar);
 
     sh1106_text_line(7, "TURN:MOVE PUSH:OPEN");

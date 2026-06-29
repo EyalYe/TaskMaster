@@ -12,6 +12,7 @@
 #include "app.h"
 #include "input.h"
 #include "sh1106.h"
+#include "net_status.h"
 #include "esp_log.h"
 
 #include <stdio.h>
@@ -44,6 +45,14 @@ static void hello_render(void)
     sh1106_text_line(2, "TURN THE KNOB:");
     snprintf(line, sizeof(line), "  COUNT = %d", s_counter);
     sh1106_text_line(3, line);
+
+    /* Reading connectivity is one call — the platform re-renders us on change,
+     * so this line stays current with no Wi-Fi event handling here (net_status.h). */
+    net_status_t ns;
+    net_status_get(&ns);
+    snprintf(line, sizeof(line), "NET: %s", net_state_str(ns.state));
+    sh1106_text_line(5, line);
+
     sh1106_text_line(6, "PUSH/SEL: RESET");
     sh1106_text_line(7, "HOME: BACK");
     sh1106_flush();

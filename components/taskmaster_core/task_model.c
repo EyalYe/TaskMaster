@@ -9,7 +9,6 @@
 static SemaphoreHandle_t s_lock;
 static task_status_t     s_status = {
     .sync       = SYNC_IDLE,
-    .wifi_rssi  = 0,
     .task_count = 0,
 };
 

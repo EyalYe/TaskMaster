@@ -17,9 +17,8 @@ typedef enum {
 } sync_state_t;
 
 typedef struct {
-    sync_state_t sync;       /* current sync phase                    */
-    int          wifi_rssi;  /* dBm; 0 = not connected                */
-    unsigned     task_count; /* tasks held (stub: 0 until Phase 3)    */
+    sync_state_t sync;       /* current task-sync phase (link state lives in net_status.h) */
+    unsigned     task_count; /* tasks held (stub: 0 until Phase 3)                         */
 } task_status_t;
 
 /* Create the mutex. Call once at boot before any task touches the model. */

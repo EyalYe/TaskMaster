@@ -6,6 +6,7 @@
 #include "input.h"
 #include "app_manager.h"
 #include "launcher.h"
+#include "net_status.h"
 
 #include "esp_log.h"
 
@@ -18,6 +19,19 @@ static void enter_launcher(void)
 {
     app_manager_switch_to(-1);
     launcher_open();
+}
+
+/* Re-render whatever's on screen now (used for system events like net change). */
+static void render_current(ui_mode_t mode)
+{
+    if (mode == MODE_LAUNCHER) {
+        launcher_render();
+    } else {
+        const device_app_t *a = app_manager_active();
+        if (a && a->render) {
+            a->render();
+        }
+    }
 }
 
 static void ui_task(void *arg)
@@ -41,6 +55,14 @@ static void ui_task(void *arg)
                 enter_launcher();
                 mode = MODE_LAUNCHER;
             }
+            continue;
+        }
+
+        /* System events (e.g. connectivity change): handled here, never delivered
+         * to an app. The contract is just "your render() gets called" — apps read
+         * net_status_get() and redraw (net_status.h). */
+        if (ev == EV_SYS_NET_CHANGED) {
+            render_current(mode);
             continue;
         }
 
@@ -68,5 +90,7 @@ static void ui_task(void *arg)
 
 void ui_start(QueueHandle_t input_events)
 {
+    /* Connectivity changes are posted onto this same queue so the UI re-renders. */
+    net_status_attach_ui(input_events);
     xTaskCreate(ui_task, "ui", 4096, (void *)input_events, 5, NULL);
 }

@@ -20,6 +20,9 @@ single UI task. Phases 0–1 are complete and confirmed on a XIAO ESP32-C3.
   an app; teardown is total/idempotent (see [`PLAN.md`](PLAN.md) §6A).
 - **Shared-model skeleton** — one mutex-guarded `task_model_t` (writer/reader ownership boundary built
   now; populated by the network task in Phase 3).
+- **Connectivity as an app API** — apps read Wi-Fi/network state from one documented place
+  (`net_status.h`: `net_status_get()` / `net_is_online()`) and the platform re-renders them on change;
+  no app touches the radio. See the app-author guide: [`docs/APP_API.md`](docs/APP_API.md).
 - **Provisioning AP still up** — SoftAP `TaskMaster-Setup` + HTTP server (the real config form lands
   in Phase 2).
 

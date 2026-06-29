@@ -353,6 +353,33 @@ Two classes share the one `device_app_t` interface:
 - **Pomodoro (user app, Phase 5):** a bundled *removable* example that proves the framework for
   third-party devs (no network needed).
 
+### Platform status for apps — connectivity (`net_status.h`)
+
+Connectivity is **platform state**, so apps read it from one documented place instead of each owning a
+Wi-Fi event handler. The app-facing surface is read-only and tiny:
+
+```c
+net_status_t ns;
+net_status_get(&ns);            // copy-out snapshot (mutex-guarded, §5.2)
+if (ns.online) { ... }          // or: net_is_online()
+// ns.state ∈ { NET_WIFI_OFF, NET_DISCONNECTED, NET_CONNECTING, NET_CONNECTED, NET_PORTAL }
+// ns.rssi  = dBm when online
+const char *label = net_state_str(ns.state);   // "OFF"/"---"/"..."/"OK"/"SETUP"
+```
+
+**The contract (what makes it streamlined):** an app just reads `net_status_get()` inside `render()`
+and the **platform re-renders the app whenever connectivity changes** — so the displayed state is
+always current with no subscription, polling, or radio handling in the app. Mechanically, a change
+posts a system event (`EV_SYS_NET_CHANGED`) onto the UI event queue; the **UI task** consumes it and
+calls the active view's `render()`. System events are **never delivered to `on_event`** — apps stay
+input-only and can't accidentally depend on event plumbing. Apps that need to *act* on a transition
+(not just redraw) cache the last `state` in their own struct and compare in `render()`.
+
+Apps **never** call `esp_wifi_*` or manage the radio — that's core's job (the network task, §8.3; the
+Setup app, §7; the `WIFI_EN` toggle, §8A). The same pattern is how future platform status (battery,
+sync) will be exposed: a `*_get()` snapshot + a system event that triggers re-render. The full
+app-author guide lives in [`docs/APP_API.md`](docs/APP_API.md).
+
 ---
 
 ## 6A. Memory safety & leak discipline

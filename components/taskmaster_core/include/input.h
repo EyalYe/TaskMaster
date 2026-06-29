@@ -11,11 +11,17 @@
 #include "freertos/queue.h"
 
 typedef enum {
+    /* Physical input (delivered to the active app's on_event, except Home). */
     EV_ENCODER_CW = 1,
     EV_ENCODER_CCW,
     EV_ENCODER_CLICK,   /* encoder push switch */
     EV_SELECT,          /* Select button */
-    EV_HOME,            /* Home button */
+    EV_HOME,            /* Home button (OS-reserved, §5.2) */
+
+    /* System events: posted by core onto the same UI event queue, handled by the
+     * UI task, and NEVER delivered to an app's on_event. Apps react by reading the
+     * relevant status in render() (the UI re-renders them when these fire). */
+    EV_SYS_NET_CHANGED = 0x40,   /* connectivity changed (net_status.h) */
 } input_event_t;
 
 /* Start the input task. Returns a queue of input_event_t to read from. */

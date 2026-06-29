@@ -14,6 +14,7 @@
 #include "softap_portal.h"
 #include "app_manager.h"
 #include "task_model.h"
+#include "net_status.h"
 #include "ui.h"
 
 static const char *TAG = "main";
@@ -28,6 +29,7 @@ void app_main(void)
     }
 
     task_model_init();
+    net_status_init();
 
     if (sh1106_init() != ESP_OK) {
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");
@@ -41,6 +43,7 @@ void app_main(void)
 
     QueueHandle_t events = input_init();
     ESP_ERROR_CHECK(softap_portal_start());
+    net_status_set(NET_PORTAL, 0);   /* SoftAP provisioning portal is up (§7) */
     ESP_LOGI(TAG, "Phase 1 up. Join '%s' and browse http://%s", SOFTAP_SSID, SOFTAP_IP);
 
     /* The UI task owns the screen, the Launcher, and app lifecycle from here. */
