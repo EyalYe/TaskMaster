@@ -27,5 +27,9 @@ typedef enum {
 /* Start the input task. Returns a queue of input_event_t to read from. */
 QueueHandle_t input_init(void);
 
+/* One-shot read of the Home button at boot (active-low). Call before input_init()
+ * to detect "Home held at reset" → force provisioning mode (PLAN §7A.3). */
+bool input_home_held(void);
+
 /* Human-readable name for logging / on-screen display. */
 const char *input_event_name(input_event_t ev);

@@ -33,7 +33,6 @@ void app_main(void)
     task_model_init();
     net_status_init();
     ESP_ERROR_CHECK(config_init());
-    ESP_LOGI(TAG, "provisioned: %d", config_is_provisioned());   /* boot-mode branch lands in §7A.3 */
 
     if (sh1106_init() != ESP_OK) {
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");
@@ -45,23 +44,31 @@ void app_main(void)
         ESP_LOGI(TAG, "  app[%u] = %s", i, app_manager_get(i)->name);
     }
 
+    /* Read Home before input_init() so a held button at reset forces setup. */
+    bool home_held    = input_home_held();
     QueueHandle_t events = input_init();
 
-    /* Slim boot-mode branch (full version with Home-held + Setup app lands in
-     * step 3, §7A.3). STA and the SoftAP portal are mutually exclusive. */
+    /* ── Boot-mode branch (§7A.3) ──
+     * Provisioning wins if Home is held at boot or the device is unprovisioned;
+     * else honor the Wi-Fi master toggle; else connect as a station. Provisioning
+     * and STA are mutually exclusive per boot. (Step 4 swaps the raw portal here
+     * for the Setup core app + its instructional OLED.) */
     uint8_t wifi_en = 1;
     config_get_u8("wifi_en", &wifi_en);
-    if (config_is_provisioned() && wifi_en) {
-        ESP_LOGI(TAG, "provisioned + Wi-Fi on -> STA connect");
-        wifi_mgr_start_sta();
+    bool provisioned = config_is_provisioned();
+    ESP_LOGI(TAG, "boot: home_held=%d provisioned=%d wifi_en=%d", home_held, provisioned, wifi_en);
+
+    if (home_held || !provisioned) {
+        ESP_LOGI(TAG, "%s -> provisioning portal", home_held ? "Home held at boot" : "unprovisioned");
+        ESP_ERROR_CHECK(softap_portal_start());
+        net_status_set(NET_PORTAL, 0);
+        ESP_LOGI(TAG, "Join '%s' and browse http://%s", SOFTAP_SSID, SOFTAP_IP);
     } else if (!wifi_en) {
         ESP_LOGI(TAG, "Wi-Fi off -> offline");
         net_status_set(NET_WIFI_OFF, 0);
     } else {
-        ESP_LOGI(TAG, "unprovisioned -> SoftAP portal");
-        ESP_ERROR_CHECK(softap_portal_start());
-        net_status_set(NET_PORTAL, 0);
-        ESP_LOGI(TAG, "Join '%s' and browse http://%s", SOFTAP_SSID, SOFTAP_IP);
+        ESP_LOGI(TAG, "provisioned + Wi-Fi on -> STA connect");
+        wifi_mgr_start_sta();
     }
 
     /* The UI task owns the screen, the Launcher, and app lifecycle from here. */

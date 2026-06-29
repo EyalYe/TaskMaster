@@ -83,6 +83,28 @@ static void input_task(void *arg)
     }
 }
 
+bool input_home_held(void)
+{
+    /* Self-contained one-shot read so it can run before input_init(). */
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << PIN_BTN_HOME,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io);
+
+    int pressed = 0;                       /* active-low: 0 = pressed */
+    for (int i = 0; i < 5; i++) {
+        if (gpio_get_level(PIN_BTN_HOME) == 0) {
+            pressed++;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    return pressed >= 4;                    /* held steadily, not a glitch */
+}
+
 QueueHandle_t input_init(void)
 {
     /* Encoder A/B + all buttons: input, pull-up (common pin → GND). */
