@@ -15,6 +15,7 @@
 #include "app_manager.h"
 #include "task_model.h"
 #include "net_status.h"
+#include "nvs_config.h"
 #include "ui.h"
 
 static const char *TAG = "main";
@@ -30,6 +31,8 @@ void app_main(void)
 
     task_model_init();
     net_status_init();
+    ESP_ERROR_CHECK(config_init());
+    ESP_LOGI(TAG, "provisioned: %d", config_is_provisioned());   /* boot-mode branch lands in §7A.3 */
 
     if (sh1106_init() != ESP_OK) {
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");
