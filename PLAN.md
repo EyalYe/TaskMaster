@@ -191,18 +191,43 @@ only*. `render()` must not block on network/I2C beyond the frame push. Apps read
 model through a provided accessor that handles locking — apps never touch the mutex directly.
 `app_manager_switch_to(i)` calls current `exit()`, then next `init()`, atomically on the UI task.
 
+### Contextual control hints (system-drawn hint strip)
+*(Inspired by CrossPoint Reader's contextual button labels.)* The OS owns a thin **hint strip** along
+the bottom of the OLED that shows what the controls do **right now** — so the meaning of the
+encoder/Select is always visible and changes with the app's current mode (e.g. Task Manager *list*
+view vs *detail submenu*). Home is reserved and always implicitly "Home", so the system draws it
+fixed and apps only declare the three app-usable controls:
+
+```c
+typedef struct {
+    const char *rotate;   /* encoder rotation, e.g. "Scroll"  (NULL = hide) */
+    const char *click;    /* encoder push,     e.g. "Open"    (NULL = hide) */
+    const char *select;   /* Select button,    e.g. "Done"    (NULL = hide) */
+} control_hints_t;
+
+void ui_set_hints(const control_hints_t *h);   /* call from the active app, UI task */
+```
+
+Apps call `ui_set_hints()` from `init()` and whenever their mode changes; the UI task renders the
+strip (compact glyphs + short labels, e.g. `↻ Scroll · ◉ Open · ✓ Done`). The Launcher sets sensible
+defaults so even a bare app gets usable hints. Cost is tiny: one LVGL label row, redrawn only when
+hints change (fits the on-demand render model, §4.2).
+
 ### Core apps
 - **App 1 — OS Launcher (boot default):** vertical scrolling list over the registered `device_app_t`
   table. Encoder rotate moves highlight; encoder click (or Select) → `app_manager_switch_to()`.
 - **App 2 & 3 — Task Manager, two instances ("Yapp" + "Local"):** one Task Manager *component* (the
   hardware embodiment of `yappmark`/`todomark`, §8) registered **twice**, each bound to a different
   task source via config. Both speak the identical device contract (§8.1); only base URL + token
-  differ. Top status bar (Wi-Fi/sync); 3-line paginated list; long lines auto-scroll. Control map
-  (encoder + Select usable, Home reserved):
-  - *Encoder rotate* — move highlight through tasks.
-  - *Select* — **complete** the highlighted task (the signature one-tap `todomark` ✓ action).
-  - *Encoder click* — open detail submenu (View description / Postpone / Sync now).
-  - *Home* — back to Launcher (OS-reserved).
+  differ. Top status bar (Wi-Fi/sync); middle = 3-line paginated list (long lines auto-scroll);
+  bottom = the contextual hint strip. Control map (encoder + Select usable, Home reserved):
+  - *Encoder rotate* — move highlight through tasks. → hint `↻ Scroll`
+  - *Select* — **complete** the highlighted task (the signature one-tap `todomark` ✓ action). → `✓ Done`
+  - *Encoder click* — open detail submenu (View description / Postpone / Sync now). → `◉ Menu`
+  - *Home* — back to Launcher (OS-reserved, system-drawn).
+
+  In the detail submenu the app re-publishes hints (e.g. `↻ Choose · ◉ Select`), so the strip always
+  reflects the current mode.
 
   Sync runs on app entry + periodically. A source with no configured URL stays hidden in the Launcher.
 - **App 4 — Settings:** on-device control of device *behavior* (§8A). Booleans/enums/numbers —
@@ -390,7 +415,7 @@ and the Settings app (behavior). Optionally enable **NVS encryption** for the se
 ## 11. Repository Layout (ESP-IDF)
 
 ```
-zepapp/
+TaskMaster/
 ├─ PLAN.md
 ├─ sdkconfig.defaults      ← Kconfig: Wi-Fi, esp_http_server, OTA, PM, LVGL trim, partition table
 ├─ partitions.csv          ← nvs / otadata / phy / ota_0 / ota_1
@@ -403,7 +428,7 @@ zepapp/
 │  ├─ net/                 ← wifi.c, softap_portal.c (esp_http_server + DNS), sync.c (contract client), ota.c
 │  ├─ storage/             ← nvs.c, config_schema.c (declarative key table → form + NVS)
 │  ├─ power/               ← idle_timeout.c, sleep.c (esp_pm / esp_sleep, wake sources)
-│  └─ ui/                  ← display.c (esp_lcd SH1106 + esp_lvgl_port), lv_conf.h, widgets.c
+│  └─ ui/                  ← display.c (esp_lcd SH1106 + esp_lvgl_port), lv_conf.h, widgets.c, hint_strip.c
 ├─ components/             ← pinned managed components (lvgl, knob, button, esp_lcd panel)
 ├─ proxy/
 │  └─ yapp_server/         ← contract impl over Todoist (reuses ~/yapp-cli code)
@@ -504,6 +529,8 @@ No open decisions remain — the plan is build-ready.
       real Wi-Fi + sync state.
 - [ ] Select completes the highlighted task; Postpone (submenu) reschedules; both reflect on next sync.
 - [ ] **Home returns to the Launcher from anywhere**, even mid-action, never swallowed by an app.
+- [ ] The contextual **hint strip** shows the current control labels and updates when an app changes
+      mode (e.g. Task Manager list view → detail submenu).
 - [ ] Settings changes (startup target, timeout, deep-sleep toggle) persist and take effect.
 - [ ] OTA: device pulls a signed image from `fw_url`, boots the new slot, and rolls back on failed confirm.
 - [ ] Input→visible-response latency feels instant (<100ms) under active background sync.
