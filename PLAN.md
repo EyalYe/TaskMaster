@@ -483,6 +483,113 @@ paste-from-phone, no on-screen typing. Add it without rearchitecting.
 
 ---
 
+## 7A. Phase 2 — build plan (provisioning · storage · Wi-Fi link)
+
+**Theme:** make the device *connect*. Phase 1 boots into a Launcher with a placeholder AP; Phase 2
+turns that into the real **Setup/Wi-Fi core app** that writes the whole config to NVS and brings the
+device online as a station — plus the storage + link-manager foundations the rest of the product
+stands on. Sync/Task Manager is **not** here (that's Phase 3); Phase 2 stops at "online + config
+persisted." It also stands up the §6A.4 leak harness carried over from Phase 1.
+
+### 7A.1 New modules
+| Module (in `taskmaster_core/`) | Role |
+|---|---|
+| `storage/nvs_config.[ch]` | Declarative config schema → typed NVS get/set; `provisioned` flag; factory reset |
+| `net/wifi_mgr.[ch]` | Owns the radio: STA connect, retry/backoff, `esp_event` handlers → drive `net_status`; honors `WIFI_EN` |
+| `app_setup.c` (core app) | The **Setup/Wi-Fi** `device_app_t` (§6): runs the portal, instructional OLED, teardown |
+| `provisioning.[ch]` (extends Phase-0 `softap_portal.c`) | SoftAP + HTTP form (GET/scan/POST) + captive DNS |
+
+### 7A.2 Storage layer — schema-driven NVS (`nvs_config`)
+One declarative table is the single source of truth (the §9.2 schema): `{key, type, max-len, secret?,
+write-path, default}`. It drives **both** the NVS read/write **and** the generated form (7A.4), so a
+new field is one row, no UI rework.
+- API: `config_init()`, `config_get_str/_u8/_u16(...)`, `config_set_str/_u8/_u16(...)`,
+  `config_is_provisioned()`, `config_factory_reset()`. One NVS namespace; `nvs_flash` wear-levels.
+- Pure key↔value mapping is **host-unit-tested** (Unity on the `linux` target) — round-trip + bounds.
+
+### 7A.3 Wi-Fi link manager + boot-mode state machine (`wifi_mgr`)
+`wifi_mgr` is the only owner of `esp_wifi_*`; everything else reads `net_status` (§6). It maps Wi-Fi
+events → states: `START/retry → NET_CONNECTING`, `GOT_IP → NET_CONNECTED(rssi)`,
+`DISCONNECTED → NET_DISCONNECTED` (retry with backoff), `WIFI_EN=0 → NET_WIFI_OFF` (radio down).
+Boot decision in `app_main`:
+```
+config_init()
+if (home_held_at_boot() || !config_is_provisioned())   → launch Setup app   (NET_PORTAL)
+else if (WIFI_EN)                                        → wifi_mgr_start_sta() (NET_CONNECTING…) → startup target (§8A)
+else  /* provisioned, Wi-Fi off */                       → offline            (NET_WIFI_OFF) → Launcher
+```
+(The always-on **sync** task that consumes the link is Phase 3; Phase 2 delivers only the link +
+accurate `net_status`.)
+
+### 7A.4 Setup/Wi-Fi core app (`app_setup`)
+A non-removable core `device_app_t` (§6), reachable from the Launcher anytime and auto-launched at
+boot when unprovisioned.
+- `init()` — bring the portal up (`provisioning_start()`), `net_status_set(NET_PORTAL)`, draw the
+  instructional screen. If launched while already connected, raise **AP (or APSTA) for the session**.
+- `render()` — instructional only: network name, `192.168.4.1`, and a live status line
+  (Waiting → Connecting → Saved ✓ → Error). The knob never enters characters.
+- `on_event()` — minimal (e.g. Select = rescan APs); the phone drives the flow.
+- `exit()` — **total teardown (§6A):** stop the HTTP server + SoftAP (`provisioning_stop()`) and
+  **restore the prior Wi-Fi state** (back to STA / honor `WIFI_EN`). Must be leak-clean (7A.7).
+
+### 7A.5 The form: GET → scan → POST → validate → commit
+1. `GET /` (+ captive wildcard) → one page **generated from the schema** (7A.2): an `<input>` per
+   provisioning-path key, secrets as password fields, SSID with a `<datalist>` from a scan.
+2. `GET /scan` → JSON of nearby APs (`esp_wifi_scan_*`) to populate the SSID picker.
+3. `POST /save` → parse the url-encoded body → write each field to NVS.
+4. **Validate before committing** (§7 step 5): attempt STA association with the new creds (≈10–15 s
+   timeout) and, if `yapp_url` is set, a source `/health` ping.
+   - **Success** → set `provisioned=1`, return a success page, stop the AP, switch to STA
+     (`NET_CONNECTED`), hand back to the Launcher / startup target.
+   - **Failure** → keep the AP up, re-render the form with the error to fix and re-paste;
+     `provisioned` stays unset.
+
+### 7A.6 `net_status` ownership after Phase 2
+| State | Set by |
+|---|---|
+| `NET_PORTAL` | Setup app `init()` |
+| `NET_CONNECTING` / `NET_CONNECTED` / `NET_DISCONNECTED` | `wifi_mgr` event handlers |
+| `NET_WIFI_OFF` | boot / Settings `WIFI_EN=0` (Phase 4 UI; key + behavior honored from Phase 2) |
+
+Offline rendering (cached tasks + `OFFLINE`) is Phase 3's Task Manager (§8.3); Phase 2 just makes the
+state correct.
+
+### 7A.7 §6A.4 leak harness (carried over)
+- Debug build (heap poisoning + leak tracing, §6A.3) — e.g. `sdkconfig.ci` / `menuconfig`.
+- A serial-triggered self-test runs launch→Home→relaunch ×N on `app_hello` **and the Setup app**
+  (whose teardown stops the HTTP server + AP — the realistic teardown to prove clean), asserting
+  `min_free_heap` returns to the pre-launch value. Becomes a standing per-app gate (§17).
+
+### 7A.8 Security touchpoints (§10)
+Open `TaskMaster-Setup` AP is up **only** during setup and **auto-disables** on success/timeout (never
+left up). PSK + tokens cross the open link during the brief paste window — acceptable for home setup,
+documented. NVS encryption stays deferred ("enable late").
+
+### 7A.9 Build order (each step independently testable)
+1. `nvs_config` + host unit test (schema round-trip).
+2. `wifi_mgr` STA connect against **pre-seeded** NVS creds; verify `NET_CONNECTING → NET_CONNECTED` on
+   hardware (status bar flips `SETUP → … → OK`).
+3. Boot-mode branch on `provisioned` / Home-held / `WIFI_EN`.
+4. `app_setup` shell (core app, auto-launch, instructional OLED, AP via the Phase-0 portal).
+5. Schema-driven `GET /` form + `GET /scan`.
+6. `POST /save` → NVS → validate → connect → commit; failure re-prompt.
+7. Re-provision-from-Launcher (APSTA/restore on `exit()`).
+8. Leak harness + run; AP auto-disable + timeouts; error/edge polish.
+
+### 7A.10 Exit criteria (§14)
+Join `TaskMaster-Setup`, paste the full config in one form, persist to NVS, **associate**, survive
+reboot (auto-connects, boots to Launcher); the Setup app auto-launches when unprovisioned and is
+reachable from the Launcher; **and** the §6A.4 leak-clean cycle passes on a heap-poisoning debug build.
+
+### 7A.11 Defaults chosen (reversible)
+- **Validate-before-commit** (don't set `provisioned` until association succeeds) — avoids bricking
+  into a bad-creds boot loop.
+- **Re-provision uses AP/APSTA for the session**, restored on `exit()` — you can always re-provision,
+  even while "offline."
+- **Offline write actions:** deferred to Phase 3 (queue vs disable) — no write path exists yet in P2.
+
+---
+
 ## 8. Data & Sync Strategy — one device contract, two source apps
 
 **Key architectural decision:** the device speaks a single fixed **task-source REST contract** — a
