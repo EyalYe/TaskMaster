@@ -38,20 +38,28 @@ new apps added by implementing one interface struct, nothing else.
 - **Task Manager** as two source apps over one device contract: "Yapp" (`yapp-server`/Todoist) and
   "Local" (platform-agnostic LAN box) — same code, different configured endpoint (§8).
 - Persist all config in NVS via the provisioning form only; survive power cycle.
-- Background sync with a visible sync/Wi-Fi status indicator.
-- App framework with ≥2 apps proving the interface (Launcher + Task Manager).
+- Background sync with a visible connectivity/sync status indicator, exposed to apps via a documented
+  read-only API (`net_status.h`, §6).
+- **Wi-Fi master on/off** in Settings — turn the radio off to save battery / stay offline; the device
+  runs offline against cached tasks (§8A/§8.3).
+- App framework with ≥2 apps proving the interface (Launcher + Task Manager), and **core apps** the
+  user can't remove (Launcher, Setup/Wi-Fi, Settings) vs. removable manifest-driven user apps (§6).
 
-### Phase 2 — after MVP is stable
+### Post-MVP — after v1.0 is stable (build Phase 5, §14)
+> Naming note: "Phase 5" here is the **build phase** in §14. (An earlier draft called this set
+> "Phase 2," which collided with the build Phase 2 = provisioning; that label is retired.)
 - **BLE provisioning** as a second transport (trivial alongside SoftAP in ESP-IDF) (§7).
-- Direct Todoist integration on-device (bypass the proxy) — see §8.
-- Third demo app (Pomodoro) to validate framework extensibility for outside developers.
+- Direct Todoist integration on-device (bypass the proxy) — see §8.4 stretch.
+- **Pomodoro** bundled example *user app* (removable) — validates framework extensibility for outside
+  developers (§6).
 
 ### Non-Goals (v1)
 - Multi-account / multiple simultaneous backends per source.
 - Offline task editing with conflict resolution (writes go to the backend or are queued simply).
 - Battery operation as *hardware* (device is USB-C powered). But the **Settings + sleep/timeout
   scaffolding is built now** (§8A) so the future battery build is a hardware change, not a rewrite;
-  v1 uses the timeout for screen-blank and ships light-sleep behind the toggle.
+  v1 uses the timeout for screen-blank, ships light-sleep behind the toggle, and already lets the user
+  cut the biggest draw via the **Wi-Fi on/off toggle** (§8A).
 - BLE features beyond optional provisioning.
 
 ---
@@ -705,7 +713,7 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 | **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline mode, §8.3) | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
 | **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
-| **5 — Hardening + Phase 2** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; Phase-2 items as separate increments |
+| **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
 
 Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP.
 
