@@ -25,5 +25,8 @@ const device_app_t *app_manager_switch_to(int index);
 /* The currently active app, or NULL when in the Launcher. */
 const device_app_t *app_manager_active(void);
 
+/* Registry index of a registered app, or -1 if not found. */
+int app_manager_index_of(const device_app_t *app);
+
 /* Forward an input event to the active app's on_event (no-op when none). */
 void app_manager_dispatch(uint8_t ev);

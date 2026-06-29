@@ -7,6 +7,7 @@ idf_component_register(
         "nvs_config.c"
         "app_store.c"
         "wifi_mgr.c"
+        "app_setup.c"
         "launcher.c"
         "ui.c"
         "sh1106.c"

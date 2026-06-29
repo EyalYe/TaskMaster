@@ -11,8 +11,8 @@
 
 #include "sh1106.h"
 #include "input.h"
-#include "softap_portal.h"
 #include "app_manager.h"
+#include "app_setup.h"
 #include "task_model.h"
 #include "net_status.h"
 #include "nvs_config.h"
@@ -38,7 +38,10 @@ void app_main(void)
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");
     }
 
-    /* Apps self-registered before app_main — enumerate the registry. */
+    /* Register core apps (non-removable). User apps self-registered via their
+     * constructors before app_main; core apps are owned by the core. */
+    app_manager_register(app_setup_get());
+
     ESP_LOGI(TAG, "Registered apps: %u", app_manager_count());
     for (unsigned i = 0; i < app_manager_count(); i++) {
         ESP_LOGI(TAG, "  app[%u] = %s", i, app_manager_get(i)->name);
@@ -50,19 +53,18 @@ void app_main(void)
 
     /* ── Boot-mode branch (§7A.3) ──
      * Provisioning wins if Home is held at boot or the device is unprovisioned;
-     * else honor the Wi-Fi master toggle; else connect as a station. Provisioning
-     * and STA are mutually exclusive per boot. (Step 4 swaps the raw portal here
-     * for the Setup core app + its instructional OLED.) */
+     * else honor the Wi-Fi master toggle; else connect as a station. In
+     * provisioning mode the UI auto-launches the Setup app, whose init() raises
+     * the portal — so STA and the portal stay mutually exclusive per boot. */
     uint8_t wifi_en = 1;
     config_get_u8("wifi_en", &wifi_en);
     bool provisioned = config_is_provisioned();
     ESP_LOGI(TAG, "boot: home_held=%d provisioned=%d wifi_en=%d", home_held, provisioned, wifi_en);
 
+    const device_app_t *initial = NULL;   /* NULL = Launcher */
     if (home_held || !provisioned) {
-        ESP_LOGI(TAG, "%s -> provisioning portal", home_held ? "Home held at boot" : "unprovisioned");
-        ESP_ERROR_CHECK(softap_portal_start());
-        net_status_set(NET_PORTAL, 0);
-        ESP_LOGI(TAG, "Join '%s' and browse http://%s", SOFTAP_SSID, SOFTAP_IP);
+        ESP_LOGI(TAG, "%s -> Setup app", home_held ? "Home held at boot" : "unprovisioned");
+        initial = app_setup_get();        /* auto-launch Setup; its init() raises the portal */
     } else if (!wifi_en) {
         ESP_LOGI(TAG, "Wi-Fi off -> offline");
         net_status_set(NET_WIFI_OFF, 0);
@@ -71,6 +73,6 @@ void app_main(void)
         wifi_mgr_start_sta();
     }
 
-    /* The UI task owns the screen, the Launcher, and app lifecycle from here. */
-    ui_start(events);
+    /* The UI task owns the screen, app lifecycle, and Home from here. */
+    ui_start(events, initial);
 }

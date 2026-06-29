@@ -12,6 +12,11 @@
 
 static const char *TAG = "portal";
 
+static bool             s_inited;    /* stack/netif/wifi_init done once */
+static httpd_handle_t   s_server;
+static TaskHandle_t     s_dns_task;
+static volatile bool    s_dns_run;
+
 /* --- Phase-0 confirmation page (the real config form arrives in Phase 2) --- */
 static const char PAGE_HTML[] =
     "<!doctype html><html><head><meta name=viewport "
@@ -31,16 +36,16 @@ static esp_err_t root_get(httpd_req_t *req)
 
 static void start_http_server(void)
 {
-    httpd_handle_t server = NULL;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn = httpd_uri_match_wildcard;
 
-    if (httpd_start(&server, &cfg) != ESP_OK) {
+    if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed");
+        s_server = NULL;
         return;
     }
     httpd_uri_t any = { .uri = "/*", .method = HTTP_GET, .handler = root_get };
-    httpd_register_uri_handler(server, &any);
+    httpd_register_uri_handler(s_server, &any);
     ESP_LOGI(TAG, "HTTP server up on http://%s", SOFTAP_IP);
 }
 
@@ -59,14 +64,18 @@ static void dns_task(void *arg)
         ESP_LOGE(TAG, "dns bind"); close(sock); vTaskDelete(NULL); return;
     }
 
+    /* Wake periodically so we can notice s_dns_run going false and exit cleanly. */
+    struct timeval tv = { .tv_sec = 0, .tv_usec = 500000 };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     uint8_t buf[512];
     uint32_t ap_ip = ipaddr_addr(SOFTAP_IP);   /* network byte order */
 
-    for (;;) {
+    while (s_dns_run) {
         struct sockaddr_in from;
         socklen_t flen = sizeof(from);
         int n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen);
-        if (n < 12) continue;                   /* smaller than a DNS header */
+        if (n < 12) continue;                   /* timeout or smaller than a DNS header */
 
         /* Turn the query into an answer in place. */
         buf[2] |= 0x80;                         /* QR = response */
@@ -84,16 +93,25 @@ static void dns_task(void *arg)
 
         sendto(sock, buf, p - buf, 0, (struct sockaddr *)&from, flen);
     }
+
+    close(sock);
+    s_dns_task = NULL;
+    vTaskDelete(NULL);
 }
 
 esp_err_t softap_portal_start(void)
 {
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_ap();
-
-    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&init));
+    if (!s_inited) {
+        ESP_ERROR_CHECK(esp_netif_init());
+        esp_err_t e = esp_event_loop_create_default();
+        if (e != ESP_ERR_INVALID_STATE) {       /* tolerate already-created */
+            ESP_ERROR_CHECK(e);
+        }
+        esp_netif_create_default_wifi_ap();
+        wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_ERROR_CHECK(esp_wifi_init(&init));
+        s_inited = true;
+    }
 
     wifi_config_t ap = {
         .ap = {
@@ -110,6 +128,19 @@ esp_err_t softap_portal_start(void)
     ESP_LOGI(TAG, "SoftAP '%s' up (open), join then browse http://%s", SOFTAP_SSID, SOFTAP_IP);
 
     start_http_server();
-    xTaskCreate(dns_task, "dns", 4096, NULL, 5, NULL);
+    s_dns_run = true;
+    xTaskCreate(dns_task, "dns", 4096, NULL, 5, &s_dns_task);
+    return ESP_OK;
+}
+
+esp_err_t softap_portal_stop(void)
+{
+    if (s_server) {
+        httpd_stop(s_server);
+        s_server = NULL;
+    }
+    s_dns_run = false;          /* dns_task closes its socket and self-deletes ≤0.5s */
+    esp_wifi_stop();            /* AP down; stack left initialized for a restart */
+    ESP_LOGI(TAG, "portal stopped");
     return ESP_OK;
 }

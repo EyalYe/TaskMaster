@@ -14,6 +14,8 @@ static const char *TAG = "ui";
 
 typedef enum { MODE_LAUNCHER, MODE_APP } ui_mode_t;
 
+static const device_app_t *s_initial_app;   /* boot app, NULL = Launcher */
+
 /* Total, idempotent teardown of any active app (§6A), then draw the Launcher. */
 static void enter_launcher(void)
 {
@@ -39,7 +41,19 @@ static void ui_task(void *arg)
     QueueHandle_t q    = (QueueHandle_t)arg;
     ui_mode_t     mode = MODE_LAUNCHER;
 
-    enter_launcher();
+    /* Boot straight into the initial app (e.g. Setup in provisioning mode), else
+     * the Launcher. Falls back to the Launcher if the app isn't registered. */
+    int idx = s_initial_app ? app_manager_index_of(s_initial_app) : -1;
+    if (idx >= 0) {
+        const device_app_t *a = app_manager_switch_to(idx);
+        mode = MODE_APP;
+        ESP_LOGI(TAG, "boot app: %s", a && a->name ? a->name : "?");
+        if (a && a->render) {
+            a->render();
+        }
+    } else {
+        enter_launcher();
+    }
 
     input_event_t ev;
     for (;;) {
@@ -88,8 +102,9 @@ static void ui_task(void *arg)
     }
 }
 
-void ui_start(QueueHandle_t input_events)
+void ui_start(QueueHandle_t input_events, const device_app_t *initial_app)
 {
+    s_initial_app = initial_app;
     /* Connectivity changes are posted onto this same queue so the UI re-renders. */
     net_status_attach_ui(input_events);
     xTaskCreate(ui_task, "ui", 4096, (void *)input_events, 5, NULL);

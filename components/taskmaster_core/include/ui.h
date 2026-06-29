@@ -10,7 +10,10 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "app.h"
 
 /* Start the UI task. `input_events` is the queue returned by input_init().
- * The task owns dispatch from here on and never returns. */
-void ui_start(QueueHandle_t input_events);
+ * `initial_app` (or NULL for the Launcher) is the app shown at boot — used to
+ * auto-launch the Setup app in provisioning mode (§7A.3/§7A.4). The task owns
+ * dispatch from here on and never returns. */
+void ui_start(QueueHandle_t input_events, const device_app_t *initial_app);

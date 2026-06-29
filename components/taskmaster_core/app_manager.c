@@ -46,6 +46,16 @@ const device_app_t *app_manager_active(void)
     return s_active;
 }
 
+int app_manager_index_of(const device_app_t *app)
+{
+    for (unsigned i = 0; i < s_count; i++) {
+        if (s_apps[i] == app) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 void app_manager_dispatch(uint8_t ev)
 {
     if (s_active != NULL && s_active->on_event != NULL) {
