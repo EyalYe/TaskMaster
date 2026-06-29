@@ -345,6 +345,7 @@ Two classes share the one `device_app_t` interface:
 - **App 4 — Settings (core, non-removable):** on-device control of device *behavior* (§8A).
   Booleans/enums/numbers — knob-editable, no typing.
   - **Startup behavior** — boot into Launcher (default) · a specific app · last-used app.
+  - **Wi-Fi** — on/off master toggle: turn the radio off to save battery / stay offline (§8A).
   - **Deep sleep** — on/off master toggle (forward-looking for the battery build).
   - **Inactivity timeout** — Off · 30s · 1m · 5m · 15m before dim/sleep.
   - (Room to grow: brightness, sync interval — same settings-schema pattern.)
@@ -494,6 +495,12 @@ Background poll (~5 min) + immediate sync on app entry + on-demand "Sync now" (a
 `esp_http_client`). Per-source caps on task count and title length bound device memory. Parse with
 **cJSON** (bundled) on a bounded buffer; use `etag` to avoid redundant re-renders.
 
+**Offline (Wi-Fi off, `WIFI_EN=0`, §8A):** the network task is idle and no sync is attempted. The
+Task Manager renders the **last cached tasks** with an **OFFLINE** status-bar indicator; "Sync now"
+is unavailable, and write actions (complete/postpone) are disabled (Phase 3 may instead queue them to
+replay on reconnect — decided when the write path lands). The same offline rendering covers a dropped
+Wi-Fi connection, so it's one code path, not two.
+
 ### 8.4 Transport / TLS
 Default to **plain HTTP on the LAN** for both sources (no on-device TLS — the big SRAM saver),
 appropriate for a desktop appliance on a trusted home network. Keep **TLS a compile-time toggle**
@@ -519,6 +526,16 @@ rearchitecting**. Values live in NVS, edited in the **Settings app** (§6), not 
     Wi-Fi state retained, fast wake) over full deep sleep initially — deep sleep tears down Wi-Fi/RAM
     and forces a reconnect, jarring for a task display. Expose the toggle as "deep sleep," implement
     light sleep first; revisit with real battery hardware.
+- **Wi-Fi master toggle (`WIFI_EN`):** the user can turn the **radio fully off** to save battery or
+  stay offline — Wi-Fi is the single biggest power draw, so this is the largest non-sleep lever.
+  - *On (default):* normal Station + sync.
+  - *Off:* the network task stops, the radio is powered down (`esp_wifi_stop`), and the device runs
+    **offline** — the Task Manager shows the last cached tasks with an **OFFLINE** status (§8.3);
+    write actions (complete/postpone) are disabled or queued (Phase 3 decides). Applied immediately on
+    toggle (settings persist on change, §9) and honored at boot.
+  - **Exception:** opening the **Setup/Wi-Fi app** temporarily brings the radio up (SoftAP) for the
+    provisioning session regardless of `WIFI_EN`, then restores the toggle's state on exit — you can
+    always re-provision even while "offline."
 - **Wake sources:** encoder rotation + the Select/Home buttons configured as GPIO wake sources
   (`esp_sleep_enable_gpio_wakeup`) so the device returns on first touch.
 - **Implementation hook:** ESP-IDF **power management** (`esp_pm`, DFS + automatic light sleep) so
@@ -557,6 +574,7 @@ ota_1      ~1.9MB  — app slot B
 | `local_token` | str | 128B | provisioning | Auth token for the LAN box (optional) |
 | `fw_url` | str | 96B | provisioning | OTA firmware image URL (optional) |
 | `startup_tgt` | u8/str | 16B | settings | Boot target (§8A) |
+| `wifi_en` | u8 | 1B | settings | Wi-Fi master on/off — radio off for battery/offline (§8A); default on |
 | `deep_sleep` | u8 | 1B | settings | Deep-sleep toggle (§8A) |
 | `idle_to_s` | u16 | 2B | settings | Inactivity timeout seconds (0 = off) |
 | `provisioned` | u8 | 1B | system | Boot flag → Launcher vs. first-run provisioning |
@@ -657,7 +675,7 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 | **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
 | **2 — Provisioning portal** ◀ next | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
-| **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server |
+| **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline mode, §8.3) | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
 | **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + Phase 2** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; Phase-2 items as separate increments |
