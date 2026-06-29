@@ -16,6 +16,7 @@
 #include "task_model.h"
 #include "net_status.h"
 #include "nvs_config.h"
+#include "wifi_mgr.h"
 #include "ui.h"
 
 static const char *TAG = "main";
@@ -45,9 +46,23 @@ void app_main(void)
     }
 
     QueueHandle_t events = input_init();
-    ESP_ERROR_CHECK(softap_portal_start());
-    net_status_set(NET_PORTAL, 0);   /* SoftAP provisioning portal is up (§7) */
-    ESP_LOGI(TAG, "Phase 1 up. Join '%s' and browse http://%s", SOFTAP_SSID, SOFTAP_IP);
+
+    /* Slim boot-mode branch (full version with Home-held + Setup app lands in
+     * step 3, §7A.3). STA and the SoftAP portal are mutually exclusive. */
+    uint8_t wifi_en = 1;
+    config_get_u8("wifi_en", &wifi_en);
+    if (config_is_provisioned() && wifi_en) {
+        ESP_LOGI(TAG, "provisioned + Wi-Fi on -> STA connect");
+        wifi_mgr_start_sta();
+    } else if (!wifi_en) {
+        ESP_LOGI(TAG, "Wi-Fi off -> offline");
+        net_status_set(NET_WIFI_OFF, 0);
+    } else {
+        ESP_LOGI(TAG, "unprovisioned -> SoftAP portal");
+        ESP_ERROR_CHECK(softap_portal_start());
+        net_status_set(NET_PORTAL, 0);
+        ESP_LOGI(TAG, "Join '%s' and browse http://%s", SOFTAP_SSID, SOFTAP_IP);
+    }
 
     /* The UI task owns the screen, the Launcher, and app lifecycle from here. */
     ui_start(events);

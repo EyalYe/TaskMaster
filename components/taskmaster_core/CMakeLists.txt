@@ -6,6 +6,7 @@ idf_component_register(
         "net_status.c"
         "nvs_config.c"
         "app_store.c"
+        "wifi_mgr.c"
         "launcher.c"
         "ui.c"
         "sh1106.c"
@@ -26,4 +27,5 @@ idf_component_register(
         esp_http_server
         lwip
         nvs_flash
+        esp_timer
 )
