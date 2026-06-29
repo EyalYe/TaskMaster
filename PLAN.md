@@ -750,11 +750,16 @@ app_store_set_u32(&store, "work", 30);              // persisted immediately
   namespace; **pick a distinctive id** and it's a non-issue.
 - **No ceremony:** typed `get/set` for str / u32 / blob; `get_*` take a default so there's no
   first-run special case. Open in `init()`, close in `exit()`.
+- **Shared, finite, unguarded pool:** all apps + device config share the **one ~24 KB `nvs`
+  partition** (§9.1) with **no per-app reservation** — an app that stores nothing costs nothing. Apps
+  are asked to be **frugal** (small config/state, not bulk data; docs/APP_API.md). Today nothing stops
+  a greedy app from crowding out others or provisioning; **per-app budget enforcement + partition
+  sizing are deferred to Phase 6** (§14).
 - **Two tiers, on purpose:** `nvs_config` = device config that drives the **setup form** (core only);
-  `app_store` = app-internal state (any app). A *future* third facility would let an app **register a
-  user-facing setting** that appears in the Settings UI — self-registered schema rows namespaced by
-  app id, mirroring app registration (§6.1). Not built yet; `app_store` covers app-private data, which
-  is the common case.
+  `app_store` = app-internal state (any app). A *future* third facility (**Phase 6**, §14) would let an
+  app **register a user-facing setting** that appears in the Settings UI — self-registered schema rows
+  namespaced by app id, mirroring app registration (§6.1). Not built yet; `app_store` covers
+  app-private data, which is the common case.
 
 ---
 
@@ -851,8 +856,10 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 | **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
+| **6 — App-ecosystem hardening** *(when a real third-party ecosystem materializes)* | Make the app platform safe to host untrusted apps: **per-app NVS budget enforcement** + `nvs` partition sizing (§9.3); namespace-**collision hardening** beyond docs; **app-declared user-facing settings** in the Settings UI (self-registered schema rows, §9.3); broader app sandboxing as needed | Apps can't exhaust NVS or crowd out core/provisioning; an app can surface its own setting in Settings without core edits; collisions detected, not just documented |
 
-Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP.
+Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP. Phase 6 = app-ecosystem hardening (deferred until
+third-party apps are a real concern).
 
 > **Current state (2026-06-30):** Phases 0–1 complete and **verified on hardware** (XIAO ESP32-C3) —
 > builds clean on ESP-IDF v6.0.1 (app ≈ 876 KB, 55% free in the OTA slot); boot enumerates the

@@ -142,6 +142,11 @@ default, so you never special-case "first run". Notes:
 - **Don't touch `nvs_config.h`** — that's core-owned device config (Wi-Fi creds, tokens, settings)
   that drives the setup form. `app_store` is your app-private tier (PLAN §9.3).
 - `app_store_erase_all(&store)` clears just your namespace (a per-app reset).
+- **Shared, finite store — be frugal.** All apps *and* device config share **one ~24 KB NVS pool**
+  with **no per-app reservation**: an app that stores nothing costs nothing, and there's no quota to
+  claim. Keep keys small and store **config/state**, not bulk data — logs, caches, and large blobs
+  belong in RAM or elsewhere. Because the pool is shared and unguarded today, a greedy app can crowd
+  out others (and even provisioning); per-app budget enforcement is a deferred item (PLAN §14 Phase 6).
 
 Writes commit immediately, so prefer writing on real changes / in `exit()` rather than every frame
 (NVS is flash). A user-facing setting that should appear in the device **Settings** UI is a separate,
