@@ -537,12 +537,16 @@ boot when unprovisioned.
    provisioning-path key, secrets as password fields, SSID with a `<datalist>` from a scan.
 2. `GET /scan` → JSON of nearby APs (`esp_wifi_scan_*`) to populate the SSID picker.
 3. `POST /save` → parse the url-encoded body → write each field to NVS.
-4. **Validate before committing** (§7 step 5): attempt STA association with the new creds (≈10–15 s
-   timeout) and, if `yapp_url` is set, a source `/health` ping.
-   - **Success** → set `provisioned=1`, return a success page, stop the AP, switch to STA
-     (`NET_CONNECTED`), hand back to the Launcher / startup target.
-   - **Failure** → keep the AP up, re-render the form with the error to fix and re-paste;
-     `provisioned` stays unset.
+4. **Save → respond → reboot → connect** (revised — see note): require a non-empty `wifi_ssid`, set
+   `provisioned=1`, return a "Saved, restarting to connect" page, then `esp_restart()` after the
+   response flushes. On reboot the boot-mode branch (§7A.3) connects as a station.
+
+> **Why not live "validate-before-commit"?** In **AP+STA**, associating the STA drags the SoftAP onto
+> the home AP's channel, which knocks the phone off our setup AP — so a *failure* page can't reliably
+> be delivered back to the phone. We therefore commit + reboot + connect, and rely on the existing
+> **Home-held-at-boot escape hatch** (§7A.3) so bad creds never lock the device out of re-provisioning
+> (a future connect-timeout auto-fallback to Setup is Phase-5 hardening). The optional source
+> `/health` validation moves to Phase 3 sync, where the link already exists.
 
 ### 7A.6 `net_status` ownership after Phase 2
 | State | Set by |
@@ -582,8 +586,10 @@ reboot (auto-connects, boots to Launcher); the Setup app auto-launches when unpr
 reachable from the Launcher; **and** the §6A.4 leak-clean cycle passes on a heap-poisoning debug build.
 
 ### 7A.11 Defaults chosen (reversible)
-- **Validate-before-commit** (don't set `provisioned` until association succeeds) — avoids bricking
-  into a bad-creds boot loop.
+- **Save → reboot → connect** (revised from validate-before-commit): the AP+STA channel hop makes a
+  live failure response unreliable, so we commit + reboot + connect, with the Home-held escape hatch
+  (§7A.3) preventing any bad-creds lockout. (Verified on hardware: form → save 7 fields → reboot →
+  associate → got IP.)
 - **Re-provision uses AP/APSTA for the session**, restored on `exit()` — you can always re-provision,
   even while "offline."
 - **Offline write actions:** deferred to Phase 3 (queue vs disable) — no write path exists yet in P2.

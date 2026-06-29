@@ -11,6 +11,8 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
+#include "esp_timer.h"
+#include "esp_system.h"
 #include "lwip/sockets.h"
 
 static const char *TAG = "portal";
@@ -106,6 +108,107 @@ static esp_err_t scan_get(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* --- POST /save: parse the form, persist to NVS, then reboot to connect --- */
+static int hexv(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    c |= 0x20;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+static void url_decode(char *s)   /* in place: %XX → byte, '+' → space */
+{
+    char *o = s;
+    for (char *p = s; *p; p++) {
+        if (*p == '+') {
+            *o++ = ' ';
+        } else if (*p == '%' && p[1] && p[2] && hexv(p[1]) >= 0 && hexv(p[2]) >= 0) {
+            *o++ = (char)((hexv(p[1]) << 4) | hexv(p[2]));
+            p += 2;
+        } else {
+            *o++ = *p;
+        }
+    }
+    *o = '\0';
+}
+
+static void reboot_cb(void *arg) { (void)arg; esp_restart(); }
+
+static void schedule_reboot(void)
+{
+    static esp_timer_handle_t t;
+    if (!t) {
+        const esp_timer_create_args_t a = { .callback = reboot_cb, .name = "reboot" };
+        esp_timer_create(&a, &t);
+    }
+    esp_timer_start_once(t, 1500000);   /* 1.5s — let the HTTP response flush first */
+}
+
+static esp_err_t save_post(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > 4096) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    char *body = malloc(total + 1);
+    if (!body) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+    }
+    int got = 0;
+    while (got < total) {
+        int r = httpd_req_recv(req, body + got, total - got);
+        if (r <= 0) {
+            free(body);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv");
+        }
+        got += r;
+    }
+    body[got] = '\0';
+
+    /* key=value&… — write each provisioning field straight to its NVS key. */
+    int n_set = 0;
+    char ssid[33] = {0};
+    char *save = NULL;
+    for (char *tok = strtok_r(body, "&", &save); tok; tok = strtok_r(NULL, "&", &save)) {
+        char *eq = strchr(tok, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *key = tok, *val = eq + 1;
+        url_decode(val);
+        const cfg_field_t *f = config_find(key);
+        if (f && f->write_path == CFG_WP_PROVISION) {
+            config_set_str(key, val);
+            n_set++;
+            if (strcmp(key, "wifi_ssid") == 0) {
+                strlcpy(ssid, val, sizeof(ssid));
+            }
+        }
+    }
+    free(body);
+
+    if (ssid[0] == '\0') {   /* SSID is the one hard requirement */
+        httpd_resp_set_type(req, "text/html");
+        return httpd_resp_sendstr(req, "<h1>Wi-Fi SSID is required.</h1><p><a href=/>Back</a></p>");
+    }
+
+    config_set_provisioned(true);
+    ESP_LOGI(TAG, "saved %d fields; provisioned; rebooting to join '%s'", n_set, ssid);
+
+    char page[512];
+    snprintf(page, sizeof(page),
+        "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
+        "<body style=\"font-family:sans-serif;max-width:30em;margin:2em auto;padding:0 1em\">"
+        "<h1>Saved &#10003;</h1><p>TaskMaster is restarting and connecting to <b>%s</b>. "
+        "This setup network will turn off. If it reappears in ~30s, the connection failed "
+        "&mdash; rejoin and re-check the password.</p></body>", ssid);
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_sendstr(req, page);
+
+    schedule_reboot();   /* boot-mode branch then connects as a station (§7A.3) */
+    return ESP_OK;
+}
+
 static void start_http_server(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
@@ -116,9 +219,11 @@ static void start_http_server(void)
         s_server = NULL;
         return;
     }
-    /* /scan must be registered before the wildcard so it isn't shadowed. */
+    /* /scan + /save before the GET wildcard so they aren't shadowed. */
     httpd_uri_t scan = { .uri = "/scan", .method = HTTP_GET, .handler = scan_get };
     httpd_register_uri_handler(s_server, &scan);
+    httpd_uri_t save = { .uri = "/save", .method = HTTP_POST, .handler = save_post };
+    httpd_register_uri_handler(s_server, &save);
     httpd_uri_t any = { .uri = "/*", .method = HTTP_GET, .handler = form_get };
     httpd_register_uri_handler(s_server, &any);
     ESP_LOGI(TAG, "HTTP server up on http://%s", SOFTAP_IP);
