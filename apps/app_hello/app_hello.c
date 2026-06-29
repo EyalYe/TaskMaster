@@ -1,18 +1,59 @@
 /*
  * app_hello — a minimal demo app that proves the manifest-driven, self-registering
- * app model (PLAN §6.1). It lives outside the core, depends only on the public app
- * API, and registers itself — taskmaster_core never references it. Comment this
- * component out of main/idf_component.yml and it vanishes from the build entirely.
+ * app model (PLAN §6.1) end to end: it self-registers, the Launcher lists it, the
+ * UI task runs its lifecycle, it responds to input, and Home tears it down cleanly.
+ * It lives outside the core, depends only on the public app API + display, and is
+ * never referenced by taskmaster_core. Comment it out of main/idf_component.yml and
+ * it vanishes from the build entirely.
+ *
+ * Holds no heap and (Phase 1, raw-rendered) no widgets, so exit() is trivially
+ * total per §6A — there is nothing to free.
  */
 #include "app.h"
+#include "input.h"
+#include "sh1106.h"
 #include "esp_log.h"
 
-static const char *TAG = "app.hello";
+#include <stdio.h>
 
-static void hello_init(void)             { ESP_LOGI(TAG, "init"); }
-static void hello_on_event(uint8_t ev)   { ESP_LOGI(TAG, "event %u", ev); }
-static void hello_render(void)           { /* drawn by the Launcher/UI in a later phase */ }
-static void hello_exit(void)             { ESP_LOGI(TAG, "exit"); }
+static const char *TAG = "app.hello";
+static int s_counter;
+
+static void hello_init(void)
+{
+    s_counter = 0;
+    ESP_LOGI(TAG, "init");
+}
+
+static void hello_on_event(uint8_t ev)
+{
+    switch (ev) {
+    case EV_ENCODER_CW:  s_counter++; break;
+    case EV_ENCODER_CCW: s_counter--; break;
+    case EV_ENCODER_CLICK:
+    case EV_SELECT:      s_counter = 0; break;   /* push / Select resets */
+    default: break;
+    }
+}
+
+static void hello_render(void)
+{
+    char line[24];
+    sh1106_clear();
+    sh1106_text_line(0, "HELLO APP");
+    sh1106_text_line(2, "TURN THE KNOB:");
+    snprintf(line, sizeof(line), "  COUNT = %d", s_counter);
+    sh1106_text_line(3, line);
+    sh1106_text_line(6, "PUSH/SEL: RESET");
+    sh1106_text_line(7, "HOME: BACK");
+    sh1106_flush();
+}
+
+static void hello_exit(void)
+{
+    /* Idempotent/total (§6A): no heap, no widgets — nothing to free. */
+    ESP_LOGI(TAG, "exit");
+}
 
 static const device_app_t hello_app = {
     .name     = "Hello",

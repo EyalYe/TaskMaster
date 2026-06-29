@@ -14,3 +14,12 @@ CONFIG_HTTPD_MAX_URI_LEN=512
 
 # --- Logging ---
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# --- §6A memory-safety / leak discipline ---
+# Stack-overflow trap is cheap — keep it on in every build.
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
+# Heap leak/overflow detection has a runtime cost: enable in debug builds via
+# `idf.py menuconfig` (Component config → Heap memory debugging) when running the
+# launch→Home→relaunch leak cycle (PLAN §6A.3/§6A.4). Left off in the default build:
+#   CONFIG_HEAP_POISONING_COMPREHENSIVE=y
+#   CONFIG_HEAP_TASK_TRACKING=y

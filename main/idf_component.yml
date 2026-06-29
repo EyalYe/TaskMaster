@@ -4,6 +4,8 @@
 #  Add an app with one line: a local `path:` (in-tree, under apps/) or a `git:`
 #  URL to the app's own repo. No core edits needed; apps self-register.
 #  (taskmaster_core is auto-discovered under components/ and required by main.)
+#  NOTE: to disable *every* app, write `dependencies: {}` — an empty `dependencies:`
+#  key (all entries commented) is invalid YAML and the manifest parser rejects it.
 # ═══════════════════════════════════════════════════════════════════════════
 dependencies:
   app_hello:

@@ -2,10 +2,13 @@
 idf_component_register(
     SRCS
         "app_manager.c"
+        "task_model.c"
+        "launcher.c"
+        "ui.c"
         "sh1106.c"
         "input.c"
         "softap_portal.c"
-    INCLUDE_DIRS "include"          # public API: app.h, app_manager.h, sh1106.h, input.h, softap_portal.h, board_pins.h
+    INCLUDE_DIRS "include"          # public API: app.h, app_manager.h, task_model.h, launcher.h, ui.h, sh1106.h, input.h, softap_portal.h, board_pins.h
     PRIV_INCLUDE_DIRS "."           # private: font5x7.h next to sh1106.c
     # public deps: headers in include/ pull these in (board_pins.h→gpio, input.h→freertos)
     REQUIRES
