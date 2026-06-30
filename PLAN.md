@@ -299,27 +299,43 @@ this boundary the single dependency is what makes a separate-repo app a one-line
 > `.bin` from a config repo (ZMK-config style). The mechanism above already enables separate-repo
 > apps today via local `path:` or `git:` deps; these only add distribution polish.
 
-### Contextual control hints (system-drawn hint strip)
-*(Inspired by CrossPoint Reader's contextual button labels.)* The OS owns a thin **hint strip** along
-the bottom of the OLED that shows what the controls do **right now** — so the meaning of the
+### Contextual control hints (system-drawn hint bar — right column)
+*(Inspired by CrossPoint Reader's contextual button labels.)* The OS can draw a **vertical hint bar
+down the right edge** of the OLED showing what the controls do **right now** — so the meaning of the
 encoder/Select is always visible and changes with the app's current mode (e.g. Task Manager *list*
-view vs *detail submenu*). Home is reserved and always implicitly "Home", so the system draws it
-fixed and apps only declare the three app-usable controls:
+view vs *detail submenu*).
 
+**Geometry (128×64).** The bar is the **rightmost 20px column, full height**, holding **three 20×20
+boxes** with **1×20px** gaps (1px tall, column-wide) at top, bottom, and between — boxes at
+`y = 1–20, 22–41, 43–62`. The remaining **108×64** on the left is the app content area. Each box shows
+a **glyph** (↻ scroll, ● open, ✓ done, ▣ home) or a **≤3-char** label.
+
+**Box → control map** (top to bottom):
+1. **Home** — OS-fixed glyph (▣); always "back to Launcher", apps don't set it.
+2. **Encoder** — one physical knob, two actions, so the box is **split into two ~9px cells**: rotate
+   (top) over push/click (bottom). The rotate cell defaults to a ↻ glyph when the app gives no label.
+3. **Select** — the app's label/glyph.
+
+Apps declare only the three app-usable controls (Home is OS-fixed):
 ```c
 typedef struct {
-    const char *rotate;   /* encoder rotation, e.g. "Scroll"  (NULL = hide) */
-    const char *click;    /* encoder push,     e.g. "Open"    (NULL = hide) */
-    const char *select;   /* Select button,    e.g. "Done"    (NULL = hide) */
+    const char *rotate;   /* encoder rotation → encoder box, top cell    (NULL = ↻ default) */
+    const char *click;    /* encoder push     → encoder box, bottom cell (NULL = hide)       */
+    const char *select;   /* Select button    → bottom box               (NULL = hide)       */
 } control_hints_t;
 
 void ui_set_hints(const control_hints_t *h);   /* call from the active app, UI task */
 ```
 
-Apps call `ui_set_hints()` from `init()` and whenever their mode changes; the UI task renders the
-strip (compact glyphs + short labels, e.g. `↻ Scroll · ◉ Open · ✓ Done`). The Launcher sets sensible
-defaults so even a bare app gets usable hints. Cost is tiny: one LVGL label row, redrawn only when
-hints change (fits the on-demand render model, §4.2).
+**Per-app: two modes** (screen real estate is scarce, so the bar is opt-in):
+- **Hint bar on** — the OS draws the 20px column; the app gets the **108×64** content area and calls
+  `ui_set_hints()` from `init()` and on mode changes.
+- **Hint bar off** — the app gets the **full 128×64** and owns the whole screen (it may draw its own
+  affordances). An app selects its mode in its `device_app_t` (e.g. a `hint_bar` flag); Home still
+  works as the physical escape hatch regardless.
+
+There is **no status bar** — connectivity/sync is surfaced by apps that want it (via `net_status.h`),
+not an OS-reserved strip. Cost is tiny: the bar redraws only when hints change (on-demand, §4.2).
 
 ### Apps — core (built-in, non-removable) vs. user (manifest-driven, removable)
 
@@ -336,15 +352,16 @@ Two classes share the one `device_app_t` interface:
 - **App 2 & 3 — Task Manager, two instances ("Yapp" + "Local"):** one Task Manager *component* (the
   hardware embodiment of `yappmark`/`todomark`, §8) registered **twice**, each bound to a different
   task source via config. Both speak the identical device contract (§8.1); only base URL + token
-  differ. Top status bar (Wi-Fi/sync); middle = 3-line paginated list (long lines auto-scroll);
-  bottom = the contextual hint strip. Control map (encoder + Select usable, Home reserved):
+  differ. Content = paginated task list (long lines auto-scroll), with Wi-Fi/sync surfaced inline (a
+  small glyph row — no OS status bar, §6); the **right hint bar** carries the controls. Control map
+  (encoder + Select usable, Home reserved):
   - *Encoder rotate* — move highlight through tasks. → hint `↻ Scroll`
   - *Select* — **complete** the highlighted task (the signature one-tap `todomark` ✓ action). → `✓ Done`
   - *Encoder click* — open detail submenu (View description / Postpone / Sync now). → `◉ Menu`
   - *Home* — back to Launcher (OS-reserved, system-drawn).
 
-  In the detail submenu the app re-publishes hints (e.g. `↻ Choose · ◉ Select`), so the strip always
-  reflects the current mode.
+  In the detail submenu the app re-publishes hints (e.g. rotate `Choose` · click `Select`), so the
+  hint bar always reflects the current mode.
 
   Sync runs on app entry + periodically. A source with no configured URL stays hidden in the Launcher.
 - **App 4 — Settings (core, non-removable) — the device hub:** a knob-driven menu (rotate to choose,
@@ -601,7 +618,7 @@ documented. NVS encryption stays deferred ("enable late").
 ### 7A.9 Build order (each step independently testable)
 1. `nvs_config` + host unit test (schema round-trip).
 2. `wifi_mgr` STA connect against **pre-seeded** NVS creds; verify `NET_CONNECTING → NET_CONNECTED` on
-   hardware (status bar flips `SETUP → … → OK`).
+   hardware (the inline net indicator flips `SETUP → … → OK`).
 3. Boot-mode branch on `provisioned` / Home-held / `WIFI_EN`.
 4. `app_setup` shell (core app, auto-launch, instructional OLED, AP via the Phase-0 portal).
 5. Schema-driven `GET /` form + `GET /scan`.
@@ -645,7 +662,7 @@ Every source — `yapp-server` and the LAN box alike — exposes:
 GET  /tasks         → { "tasks":[ { id, title(≤N), priority(1-4), due, parent_id, done } ], "etag" }
 POST /tasks/{id}/complete                          → mark complete
 POST /tasks/{id}/postpone   { "due":"tomorrow" }   → reschedule (optional; 501 if unsupported)
-GET  /health                                       → liveness for the status bar
+GET  /health                                       → liveness (shown inline by the app)
 ```
 Rules: flat JSON, server-truncated titles, bounded task count (e.g. ≤50), `priority` normalized to
 1–4 (4 = highest, matching Todoist). `etag` lets the device skip re-rendering unchanged lists.
@@ -701,7 +718,7 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
 | Piece | Where | Role |
 |---|---|---|
 | `esp_lvgl_port` + `esp_lcd` SH1106 | core managed deps | LVGL on the panel (wraps/replaces raw `sh1106.c`) |
-| `ui` frame | `taskmaster_core/ui/` | OS-drawn LVGL frame: status bar (top) + hint strip (bottom) + app content area |
+| `ui` frame | `taskmaster_core/ui/` | OS-drawn LVGL frame: optional **right hint bar** (20px, 3 boxes) + content area; **no status bar** (§6) |
 | `task_model` (real) | `taskmaster_core/` | Fixed `task_t tasks[TASKMASTER_MAX_TASKS]` filled by parse (§6A.1), mutex-guarded |
 | `source_client` + `sync_task` | `taskmaster_core/net/` | `esp_http_client` GET/POST over the contract; the one always-on §5.2 writer |
 | `app_tasks` | `apps/app_tasks/` | Task Manager user app — registered **twice** (Yapp + Local) |
@@ -712,9 +729,10 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
    Configure LVGL: **1-bit (`I1`)** color depth, one **partial** draw buffer, monochrome theme,
    Kconfig-trim unused widgets/fonts (§4.4). Pump `lv_timer_handler` from the UI task on events +
    while animating. Smoke test: a label on the OLED.
-2. **OS UI frame.** An LVGL layer the OS owns: top **status bar** (source • Wi-Fi • sync glyphs, from
-   `net_status`/`sync_state`) + bottom **hint strip** (`control_hints_t` / `ui_set_hints()`, §6), with a
-   middle **content container** apps draw into. Status bar auto-updates on `EV_SYS_NET_CHANGED`.
+2. **OS UI frame.** An LVGL layer the OS owns: the optional **right hint bar** (20px column, 3 boxes —
+   Home / encoder-split / Select, §6) plus a **content container** apps draw into (108×64 with the bar,
+   128×64 without it, per the app's `hint_bar` mode). `ui_set_hints()` updates the bar; **no status
+   bar** — apps surface connectivity via `net_status.h` if they want it.
 3. **Screen-owned lifecycle (§6A).** Each app gets its own LVGL screen; `init()` builds widgets parented
    to it; `exit()` = delete that screen → frees the whole tree in one call (the §6A "owned-by-screen"
    rule becomes real). `app_manager`/`ui` create+load the app screen on switch, delete on exit. **Re-run
@@ -737,7 +755,7 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
    on-demand "Sync now"; honors `WIFI_EN`/`net_status` (idle when offline); sets `sync_state`
    (CONNECTING/SYNCING/OK/ERROR) and notifies the UI via task-notification.
 9. **Task Manager — render (read-only).** `app_tasks`: priority-sorted, **nested** via `parent_id`
-   (`↳` indent), scrollable LVGL list, status bar + hint strip (from Part A), empty state
+   (`↳` indent), scrollable LVGL list, right hint bar (from Part A) + inline Wi-Fi/sync glyphs, empty state
    "No open tasks 🎉". Reads the model through the locking accessor (§5.2).
 10. **Task Manager — actions.** *Select* = complete (`POST /complete`, optimistic remove, reflect next
     sync); *encoder click* = detail submenu (View description / Postpone / Sync now); *Postpone* =
@@ -764,7 +782,7 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
 
 #### 8.5.5 Exit criteria (§14 Phase 3)
 LVGL is the UI foundation (all Phase 0–2 screens ported, leak-clean); tasks display priority-sorted
-with nesting (mirrors `todomark`) within one sync cycle; status bar reflects real Wi-Fi + sync;
+with nesting (mirrors `todomark`) within one sync cycle; Wi-Fi + sync shown inline (no status bar);
 complete + postpone work and reflect on next sync; the "Local" app works against the stub;
 **Wi-Fi-off shows cached tasks + `OFFLINE`**; `app_tasks` passes the §6A.4 leak gate.
 
@@ -972,7 +990,7 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 | **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
 | **2 — Provisioning portal** ✅ | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
-| **3 — UI foundation + Sync + Task Manager** ◀ next | **Adopt LVGL** (decided, §8.5 Part A): port the Launcher/Setup/Hello screens + screen-owned-widget lifecycle; then `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline, §8.3) | LVGL is the UI foundation (Phase 0–2 screens ported, leak-clean); tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
+| **3 — UI foundation + Sync + Task Manager** ◀ next | **Adopt LVGL** (decided, §8.5 Part A): port the Launcher/Setup/Hello screens + screen-owned-widget lifecycle; then `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline, §8.3) | LVGL is the UI foundation (Phase 0–2 screens ported, leak-clean); tasks display priority-sorted with nesting (mirrors `todomark`); Wi-Fi/sync shown inline; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
 | **4 — Settings + power** | Build the **Settings hub** (§6) — absorbs Wi-Fi setup as a menu item (removes the interim standalone Setup app, §7A.4) + device info / factory reset / restart / OTA-stub; idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Settings menu navigates; Wi-Fi setup opens the portal and boot auto-opens it when unprovisioned; startup target, deep-sleep toggle, timeout persist and take effect; screen blanks on idle; **system reaches light sleep when idle** |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
@@ -1044,15 +1062,16 @@ No open decisions remain — the plan is build-ready.
 - [ ] All config persists across power cycle; device auto-connects on next boot.
 - [ ] Launcher lists registered apps; encoder navigates; Select/click switches app with no crash/leak.
 - [ ] Task Manager shows Todoist tasks (via `yapp-server`) within one sync cycle, priority-sorted with
-      nesting, mirroring `todomark`; the "Local" app works against a stub source; status bar reflects
-      real Wi-Fi + sync state.
+      nesting, mirroring `todomark`; the "Local" app works against a stub source; Wi-Fi + sync state
+      shown inline (no OS status bar, §6).
 - [ ] Select completes the highlighted task; Postpone (submenu) reschedules; both reflect on next sync.
 - [ ] **Home returns to the Launcher from anywhere**, even mid-action, never swallowed by an app.
 - [x] **Leak-clean teardown:** launch→Home→relaunch cycles restore the free heap to baseline per app,
       with comprehensive heap poisoning catching no corruption (§6A.4 / §7A.7). *(Hello + Setup pass on
       hardware; mid-fetch Home + 100× scaling fold into Phase 3 once a real fetch exists.)*
-- [ ] The contextual **hint strip** shows the current control labels and updates when an app changes
-      mode (e.g. Task Manager list view → detail submenu).
+- [ ] The contextual **right hint bar** (Home / encoder-split / Select) shows the current control
+      labels/glyphs and updates when an app changes mode (e.g. Task Manager list → detail submenu);
+      apps can turn it off for full-width screens.
 - [ ] Settings changes (startup target, timeout, deep-sleep toggle) persist and take effect.
 - [ ] OTA: device pulls a signed image from `fw_url`, boots the new slot, and rolls back on failed confirm.
 - [ ] Input→visible-response latency feels instant (<100ms) under active background sync.

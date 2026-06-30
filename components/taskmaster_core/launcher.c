@@ -13,8 +13,12 @@
 #include "task_model.h"
 #include "net_status.h"
 #include "sh1106.h"
+#include "hint_bar.h"
 
 #include <stdio.h>
+
+/* Launcher control hints (right bar): rotate scrolls, click/Select opens. */
+static const control_hints_t LAUNCHER_HINTS = { .rotate = "<>", .click = "OPN", .select = "OPN" };
 
 #define LIST_FIRST_ROW 1
 #define LIST_ROWS      5   /* rows 1..5 show apps */
@@ -56,16 +60,17 @@ void launcher_render(void)
         }
     }
 
+    /* Inline net/sync indicator (no OS status bar, §6) — kept left of the bar. */
     net_status_t ns;
     net_status_get(&ns);
     task_status_t st;
     task_model_get(&st);
-    char bar[24];
-    snprintf(bar, sizeof(bar), "NET:%s SYNC:%s",
+    char bar[20];
+    snprintf(bar, sizeof(bar), "NET:%s SY:%s",
              net_state_str(ns.state), sync_state_label(st.sync));
-    sh1106_text_line(6, bar);
+    sh1106_text_line(7, bar);
 
-    sh1106_text_line(7, "TURN:MOVE PUSH:OPEN");
+    hint_bar_draw(&LAUNCHER_HINTS);   /* right column (§6) */
     sh1106_flush();
 }
 

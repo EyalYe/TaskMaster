@@ -14,7 +14,10 @@
 #include "sh1106.h"
 #include "net_status.h"
 #include "app_store.h"
+#include "hint_bar.h"
 #include "esp_log.h"
+
+static const control_hints_t HELLO_HINTS = { .rotate = "+/-", .click = "RST", .select = "RST" };
 
 #include <stdio.h>
 
@@ -60,8 +63,7 @@ static void hello_render(void)
     snprintf(line, sizeof(line), "NET: %s", net_state_str(ns.state));
     sh1106_text_line(5, line);
 
-    sh1106_text_line(6, "PUSH/SEL: RESET");
-    sh1106_text_line(7, "HOME: BACK");
+    hint_bar_draw(&HELLO_HINTS);   /* right control bar (§6) */
     sh1106_flush();
 }
 
