@@ -42,8 +42,9 @@ new apps added by implementing one interface struct, nothing else.
   read-only API (`net_status.h`, §6).
 - **Wi-Fi master on/off** in Settings — turn the radio off to save battery / stay offline; the device
   runs offline against cached tasks (§8A/§8.3).
-- App framework with ≥2 apps proving the interface (Launcher + Task Manager), and **core apps** the
-  user can't remove (Launcher, Setup/Wi-Fi, Settings) vs. removable manifest-driven user apps (§6).
+- App framework with ≥2 apps proving the interface (Launcher + Task Manager), and **non-removable core
+  apps** (the **Launcher** and **Settings** — the device hub that includes Wi-Fi setup) vs. removable
+  manifest-driven user apps (§6).
 
 ### Post-MVP — after v1.0 is stable (build Phase 5, §14)
 > Naming note: "Phase 5" here is the **build phase** in §14. (An earlier draft called this set
@@ -324,18 +325,13 @@ hints change (fits the on-demand render model, §4.2).
 Two classes share the one `device_app_t` interface:
 - **Core apps** are compiled into `taskmaster_core` and register themselves unconditionally — they are
   **not** listed in `main/idf_component.yml` and the user **cannot remove** them. These are the OS:
-  the Launcher, **Setup/Wi-Fi**, and Settings.
+  the Launcher and **Settings** (the device hub, which includes Wi-Fi setup).
 - **User apps** are separate components added/removed via the manifest (§6.1) — e.g. the Task Manager
   instances, and bundled examples like Pomodoro. Removing one is a one-line manifest edit.
 
 - **App 1 — OS Launcher (boot default, core):** vertical scrolling list over the registered
   `device_app_t` table. Encoder rotate moves highlight; encoder click (or Select) →
   `app_manager_switch_to()`.
-- **App — Setup / Wi-Fi (core, non-removable):** the provisioning app (§7). Always present in the
-  Launcher so the user can **re-provision at any time**, and **auto-launched at boot** when the device
-  is unprovisioned (or Home is held at boot, or config is missing). Drives the core SoftAP + HTTP
-  portal service (it does not spawn its own tasks, §6A.2); its `exit()` tears the portal down so it
-  never outlives the app. See §7 for the flow.
 - **App 2 & 3 — Task Manager, two instances ("Yapp" + "Local"):** one Task Manager *component* (the
   hardware embodiment of `yappmark`/`todomark`, §8) registered **twice**, each bound to a different
   task source via config. Both speak the identical device contract (§8.1); only base URL + token
@@ -350,13 +346,24 @@ Two classes share the one `device_app_t` interface:
   reflects the current mode.
 
   Sync runs on app entry + periodically. A source with no configured URL stays hidden in the Launcher.
-- **App 4 — Settings (core, non-removable):** on-device control of device *behavior* (§8A).
-  Booleans/enums/numbers — knob-editable, no typing.
-  - **Startup behavior** — boot into Launcher (default) · a specific app · last-used app.
+- **App 4 — Settings (core, non-removable) — the device hub:** a knob-driven menu (rotate to choose,
+  Select to act) that holds **all** device/network/system functions. This is the single core utility
+  app — Wi-Fi setup is a menu item here, **not** a separate app. Items:
+  - **Wi-Fi setup** — raise the paste-from-phone provisioning portal (§7): SoftAP + the schema-driven
+    form. The only item that's an *action* (opens the portal) rather than a knob-edited value; it's
+    also **auto-opened at boot** when the device is unprovisioned or Home is held at reset (§7A.3).
   - **Wi-Fi** — on/off master toggle: turn the radio off to save battery / stay offline (§8A).
+  - **Startup behavior** — boot into Launcher (default) · a specific app · last-used app.
   - **Deep sleep** — on/off master toggle (forward-looking for the battery build).
   - **Inactivity timeout** — Off · 30s · 1m · 5m · 15m before dim/sleep.
+  - **Device / network info** — read-only: IP, MAC, RSSI, SSID, firmware version, free heap, uptime.
+  - **Factory reset** — wipe NVS (creds + app data) behind a confirm, then reboot into Wi-Fi setup
+    (`config_factory_reset()`).
+  - **Restart** — soft reboot (`esp_restart`) for recovery without unplugging.
+  - **OTA update** — pull a signed image from `fw_url` (Phase 4.5; a stub/"coming soon" until then).
   - (Room to grow: brightness, sync interval — same settings-schema pattern.)
+  Behavior settings persist to NVS immediately on change (§9). **Boundary:** Settings owns
+  network/device/system; *task* sources live in the Task Manager apps (§8).
   Each setting persists to NVS immediately on change (§9).
 - **Pomodoro (user app, Phase 5):** a bundled *removable* example that proves the framework for
   third-party devs (no network needed).
@@ -446,11 +453,12 @@ after Home **equals** the value before launch. Run it per app, and explicitly **
 
 ## 7. Provisioning — paste everything from your phone
 
-**Core principle:** every value that lands in NVS is entered through the **Setup/Wi-Fi core app**
-(§6, non-removable) by pasting from a phone or laptop. Nothing is hardcoded; nothing is dialed in
-letter-by-letter. One form, paste, submit, done — for today's fields and any added later. The Setup
-app is **auto-launched at boot** when unprovisioned (or Home-held-at-boot / config missing) and is
-**also reachable from the Launcher anytime** to re-provision.
+**Core principle:** every value that lands in NVS is entered through **Wi-Fi setup** — the provisioning
+item in the non-removable **Settings hub** (§6) — by pasting from a phone or laptop. Nothing is
+hardcoded; nothing is dialed in letter-by-letter. One form, paste, submit, done — for today's fields
+and any added later. Wi-Fi setup is **auto-opened at boot** when unprovisioned (or Home-held-at-boot /
+config missing), overriding the configured startup target, and is **also reachable from Settings
+anytime** to re-provision. *(Interim Phase-2 build: a standalone `app_setup`, §7A.4.)*
 
 ### Primary path — SoftAP setup portal (MVP)
 Built on ESP-IDF's **SoftAP + `esp_http_server` + a small DNS captive-portal responder** (all
@@ -514,14 +522,24 @@ events → states: `START/retry → NET_CONNECTING`, `GOT_IP → NET_CONNECTED(r
 Boot decision in `app_main`:
 ```
 config_init()
-if (home_held_at_boot() || !config_is_provisioned())   → launch Setup app   (NET_PORTAL)
-else if (WIFI_EN)                                        → wifi_mgr_start_sta() (NET_CONNECTING…) → startup target (§8A)
-else  /* provisioned, Wi-Fi off */                       → offline            (NET_WIFI_OFF) → Launcher
+if (home_held_at_boot() || !config_is_provisioned())   → Settings → Wi-Fi setup (NET_PORTAL)   // overrides STARTUP_TARGET
+else if (WIFI_EN)                                        → wifi_mgr_start_sta() (NET_CONNECTING…) → STARTUP_TARGET (§8A)
+else  /* provisioned, Wi-Fi off */                       → offline            (NET_WIFI_OFF) → STARTUP_TARGET
 ```
+("Settings → Wi-Fi setup" is the Phase-4 target; the interim Phase-2 build launches the standalone
+`app_setup`, §7A.4. No-credentials always wins over the configured startup target.)
 (The always-on **sync** task that consumes the link is Phase 3; Phase 2 delivers only the link +
 accurate `net_status`.)
 
-### 7A.4 Setup/Wi-Fi core app (`app_setup`)
+### 7A.4 Setup app (`app_setup`) — **interim** (folds into Settings at Phase 4)
+
+> **Restructure (decided):** Wi-Fi setup is **not** a standalone app — it's the **Wi-Fi setup item in
+> the Settings hub** (§6). The standalone `app_setup` built in Phase 2 is an **interim provisioning
+> vehicle** (Settings doesn't exist until Phase 4). At Phase 4 its portal logic becomes the *Wi-Fi
+> setup* action inside Settings and the standalone app is removed; the boot branch then auto-opens
+> **Settings → Wi-Fi setup** instead of a separate Setup app. `wifi_mgr` / `softap_portal` /
+> `nvs_config` are unaffected — only the owning app changes.
+
 A non-removable core `device_app_t` (§6), reachable from the Launcher anytime and auto-launched at
 boot when unprovisioned.
 - `init()` — bring the portal up (`provisioning_start()`), `net_status_set(NET_PORTAL)`, draw the
@@ -674,7 +692,9 @@ USB-C powered today, but these controls are built now so the **future battery bu
 rearchitecting**. Values live in NVS, edited in the **Settings app** (§6), not the provisioning form.
 
 - **Startup behavior:** on boot `app_manager` reads `STARTUP_TARGET` → Launcher (default), a chosen
-  app (e.g. "Yapp"), or last-used. Home still always returns to the Launcher (§5.2).
+  app (e.g. "Yapp"), or last-used. **Override:** if **no Wi-Fi credentials are saved** (unprovisioned),
+  `STARTUP_TARGET` is ignored and the device boots straight into **Settings → Wi-Fi setup** so it can
+  be provisioned first (§7A.3). Home still always returns to the Launcher (§5.2).
 - **Inactivity timeout:** an idle timer (reset by any input event) fires after `IDLE_TIMEOUT_S`.
   **Stage 1:** blank/dim the OLED (saves the panel, kills burn-in) and pause the render loop.
   **Stage 2 (only if deep sleep on):** enter low power.
@@ -691,7 +711,7 @@ rearchitecting**. Values live in NVS, edited in the **Settings app** (§6), not 
     **offline** — the Task Manager shows the last cached tasks with an **OFFLINE** status (§8.3);
     write actions (complete/postpone) are disabled or queued (Phase 3 decides). Applied immediately on
     toggle (settings persist on change, §9) and honored at boot.
-  - **Exception:** opening the **Setup/Wi-Fi app** temporarily brings the radio up (SoftAP) for the
+  - **Exception:** opening **Wi-Fi setup** (Settings) temporarily brings the radio up (SoftAP) for the
     provisioning session regardless of `WIFI_EN`, then restores the toggle's state on exit — you can
     always re-provision even while "offline."
 - **Wake sources:** encoder rotation + the Select/Home buttons configured as GPIO wake sources
@@ -869,7 +889,7 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
 | **2 — Provisioning portal** ✅ | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
 | **3 — Sync + Task Manager** ◀ next | `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline mode, §8.3) | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
-| **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
+| **4 — Settings + power** | Build the **Settings hub** (§6) — absorbs Wi-Fi setup as a menu item (removes the interim standalone Setup app, §7A.4) + device info / factory reset / restart / OTA-stub; idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Settings menu navigates; Wi-Fi setup opens the portal and boot auto-opens it when unprovisioned; startup target, deep-sleep toggle, timeout persist and take effect; screen blanks on idle; **system reaches light sleep when idle** |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
 | **6 — App-ecosystem hardening** *(when a real third-party ecosystem materializes)* | Make the app platform safe to host untrusted apps: **per-app NVS budget enforcement** + `nvs` partition sizing (§9.3); namespace-**collision hardening** beyond docs; **app-declared user-facing settings** in the Settings UI (self-registered schema rows, §9.3); broader app sandboxing as needed | Apps can't exhaust NVS or crowd out core/provisioning; an app can surface its own setting in Settings without core edits; collisions detected, not just documented |
@@ -923,7 +943,7 @@ path and drops off the register, downgraded to a Phase-0 verification spike.)*
 | 4 | UI library | **LVGL** via `esp_lvgl_port` — 1-bit, single partial buffer, trimmed |
 | 5 | Backend / data | **One device contract, two source apps** — "Yapp" (`yapp-server`/Todoist) + "Local" (LAN box) |
 | 6 | Transport | **Plain HTTP on LAN** for both; TLS a compile-time toggle for remote later |
-| 7 | Provisioning | **Paste-from-phone SoftAP portal** via the **Setup/Wi-Fi core app** (non-removable; all config in one form); carousel dropped; BLE = a post-MVP (Phase 5) second transport |
+| 7 | Provisioning | **Paste-from-phone SoftAP portal** as the **Wi-Fi-setup item in the Settings hub** (non-removable; all config in one form); carousel dropped; BLE = a post-MVP (Phase 5) second transport |
 | 8 | OTA | **Yes — ESP-IDF native dual-slot** (`esp_https_ota`) + rollback, image from `fw_url` |
 | 9 | Settings/power | **Settings app** controls startup target, deep-sleep toggle, inactivity timeout — battery-ready scaffolding (§8A) |
 | 10 | IDF version | **v6.0.1** (installed via `eim`), pinned for reproducibility |
