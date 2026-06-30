@@ -120,16 +120,26 @@ is available via `config_factory_reset()`.
 
 ### Managing apps
 
-Edit [`main/idf_component.yml`](main/idf_component.yml):
+Apps live in their **own repos** and are pulled into a build via the manifest
+[`main/idf_component.yml`](main/idf_component.yml) — core and apps version independently (PLAN §11.2):
+
 ```yaml
 dependencies:
-  app_hello:
-    path: ../apps/app_hello        # in-tree app
-  # app_clock:
-  #   git: https://github.com/somedev/tm-clock.git   # external app, own repo
+  app_hello:                          # in-tree example (this repo)
+    path: ../apps/app_hello
+  tm_local:                           # external app from its own repo, app/ subdir
+    git: git@github.com:EyalYe/TM-YappLocal.git
+    path: app
 ```
-Comment an entry out to disable that app (it won't compile). To disable **every** user app, write
-`dependencies: {}` — an empty `dependencies:` key (all entries commented) is invalid YAML.
+
+The component manager fetches the remote into `managed_components/`, and the app **self-registers**
+(`TASKMASTER_REGISTER_APP`) — **no core edits**. Comment an entry out to remove that app (it isn't
+built or shown); to disable **every** app, write `dependencies: {}` (an empty `dependencies:` key is
+invalid YAML). Each app declares its own config (URLs/tokens) via `TASKMASTER_REGISTER_APP_CONFIG`, so
+core never hardcodes app fields (PLAN §9.4).
+
+> A remote/private app repo is fetched over SSH at configure time, so a clean build needs git access to
+> it (cached in `managed_components/` + pinned in `dependencies.lock` afterward).
 
 ## Verify (Phase 2)
 

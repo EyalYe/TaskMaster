@@ -8,8 +8,16 @@
 #  key (all entries commented) is invalid YAML and the manifest parser rejects it.
 # ═══════════════════════════════════════════════════════════════════════════
 dependencies:
+  # In-tree example app (lives in this repo, the canonical smoke/leak-test app).
   app_hello:
     path: ../apps/app_hello
-  # app_clock:
-  #   git: https://github.com/somedev/tm-clock.git
-  #   version: v0.2.0
+
+  # Remote app from its own repo: the device app is in the repo's app/ subdir
+  # (`path`), pulled over git. This is how the two source products are installed —
+  # uncomment to include them (the app self-registers; no core edits).
+  tm_local:
+    git: git@github.com:EyalYe/TM-YappLocal.git
+    path: app
+  # tm_yapp:
+  #   git: git@github.com:EyalYe/TM-YappCloud.git
+  #   path: app
