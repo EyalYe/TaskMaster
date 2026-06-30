@@ -725,10 +725,17 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
 | `yapp_server` + Local stub | `proxy/` (host) | Contract over Todoist via `~/yapp-cli`; canned-task stub for "Local" + tests |
 
 #### 8.5.2 Build order — Part A: LVGL UI foundation
-1. **LVGL bring-up.** Add `esp_lvgl_port` + an `esp_lcd` SH1106 panel (mind the 2-px column offset).
-   Configure LVGL: **1-bit (`I1`)** color depth, one **partial** draw buffer, monochrome theme,
-   Kconfig-trim unused widgets/fonts (§4.4). Pump `lv_timer_handler` from the UI task on events +
-   while animating. Smoke test: a label on the OLED.
+1. **LVGL bring-up.** ✅ **Done.** LVGL **9.4** (`lvgl/lvgl` managed dep) driven onto the panel
+   **through our existing `sh1106` framebuffer** — a custom **I1** flush callback (`lvgl_disp.c`) maps
+   LVGL's 1-bit, MSB-first, full-refresh buffer to `sh1106_pixel` + `sh1106_flush` (no `esp_lcd` panel,
+   so the 2-px offset + I2C stay in the proven driver). Tick via `esp_timer`; `lv_timer_handler` pumped
+   on a dedicated task. **Font: `UNSCII_8`** (1-bit) as the default — anti-aliased fonts (Montserrat)
+   **dither to "dots"** on a mono panel; UNSCII is crisp *and* brings lowercase (retiring the 5×7
+   uppercase-only bring-up font). Verified on hardware: solid box + crisp `LVGL ok 123`. Footprint:
+   ~**+187 KB** flash when used (still 44% free in the OTA slot); ~0 while gc'd. *(Note: LVGL ships a
+   `CMakePresets.json` that can wedge CMake configure — delete it if a fresh build trips on "hidden
+   preset `_base`".)* LVGL-port/`esp_lcd` not needed; Kconfig-trim deferred to when RAM/flash pressure
+   warrants.
 2. **OS UI frame.** An LVGL layer the OS owns: the optional **right hint bar** (20px column, 3 boxes —
    Home / encoder-split / Select, §6) plus a **content container** apps draw into (108×64 with the bar,
    128×64 without it, per the app's `hint_bar` mode). `ui_set_hints()` updates the bar; **no status

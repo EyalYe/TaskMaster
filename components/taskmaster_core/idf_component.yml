@@ -1,0 +1,6 @@
+# Managed dependencies for taskmaster_core (PLAN §11).
+# LVGL is the UI foundation from Phase 3 (§8.5 Part A). The display is driven via a
+# custom flush callback into our existing sh1106 framebuffer (no esp_lcd panel) —
+# see ui/lvgl_disp.c.
+dependencies:
+  lvgl/lvgl: "^9.2"

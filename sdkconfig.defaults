@@ -15,6 +15,12 @@ CONFIG_HTTPD_MAX_URI_LEN=512
 # --- Logging ---
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
+# --- LVGL (UI foundation, §8.5) ---
+# 1-bit pixel font: crisp on the mono OLED (anti-aliased fonts dither to "dots").
+# UNSCII also has lowercase, replacing the bring-up 5x7 uppercase-only font.
+CONFIG_LV_FONT_UNSCII_8=y
+CONFIG_LV_FONT_DEFAULT_UNSCII_8=y
+
 # --- §6A memory-safety / leak discipline ---
 # Stack-overflow trap is cheap — keep it on in every build.
 CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y

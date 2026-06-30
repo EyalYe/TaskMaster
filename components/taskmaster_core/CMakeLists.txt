@@ -10,6 +10,7 @@ idf_component_register(
         "app_setup.c"
         "leak_test.c"
         "hint_bar.c"
+        "lvgl_disp.c"
         "launcher.c"
         "ui.c"
         "sh1106.c"
@@ -31,4 +32,5 @@ idf_component_register(
         lwip
         nvs_flash
         esp_timer
+        lvgl
 )
