@@ -183,9 +183,10 @@ Wi-Fi/IP lifecycle runs on ESP-IDF's `esp_event` loop, feeding the network task.
 - A single `board_pins.h` holds GPIO assignments — the one place wiring is described.
 
 ### 5.2 Shared state & ownership (the rule that prevents most bugs)
-- One `task_model_t` (task list + sync status + Wi-Fi RSSI). **Writer:** network task only.
-  **Readers:** UI task only. Guarded by a FreeRTOS **mutex**; readers copy-out under the lock and
-  render outside it.
+- **Connectivity** (`net_status`, §6) is the one piece of shared status core owns: writer = `wifi_mgr`
+  on the event loop, readers copy-out; the UI re-renders on change. *(There is no core task model —
+  tasks are userspace, §8. An app's `task_t` model is owned by the **UI task only**, since fetch
+  results are delivered there by `async_job` (§8.5 step 8) — so app models need **no mutex**.)*
 - **Active app pointer** owned by the UI task. Input events and "switch app" requests are *messages*
   (queue items), never direct pointer writes from other tasks.
 - **Home button** handled at this boundary: on a "go home" message the UI task runs the current
@@ -442,12 +443,14 @@ race-on-teardown by construction.
 - **One owner per allocation, documented.** Allocations that cross a function boundary are the ones
   that rot; the `device_app_t` contract states who frees what.
 
-### 6A.2 No app-owned worker tasks (a prohibition, not a procedure)
-The model is **one shared, always-on network task** that owns the task model (§5.2) — *not* per-app
-workers. Apps therefore **must not spawn their own tasks.** This designs out the in-flight-fetch
-use-after-free entirely: on Home the app's widgets are freed while the model persists (core-owned,
-mutex-guarded), so nothing writes into freed memory. If a future app ever needs background work, it
-becomes a core service, not an app-owned task.
+### 6A.2 No app-owned worker tasks — use the core `async_job` service
+Apps **must not spawn their own tasks.** Background I/O (a task fetch) goes through the core
+**`async_job`** service (§8.5 step 8): the work runs on a **core-owned** worker, and the result is
+delivered back **on the UI task**. This designs out the in-flight-fetch use-after-free: an app's
+`exit()` calls `async_job_cancel()`, so a fetch in flight can't write into freed app memory; and
+because results land on the UI task, the app's `task_t` model is single-threaded (no mutex). Core owns
+the worker; apps stay single-task — the §6A teardown guarantee holds for every app, first- or
+third-party.
 
 ### 6A.3 Tooling — all built into ESP-IDF, debug builds only
 - **Heap poisoning:** `CONFIG_HEAP_POISONING_COMPREHENSIVE` — canaries catch overflow, use-after-free,
@@ -649,37 +652,51 @@ reachable from the Launcher; **and** the §6A.4 leak-clean cycle passes on a hea
 
 ---
 
-## 8. Data & Sync Strategy — one device contract, two source apps
+## 8. Data & Sync Strategy — tasks are **userspace** (core knows nothing about them)
 
-**Key architectural decision:** the device speaks a single fixed **task-source REST contract** — a
-small set of "known endpoints." The firmware knows *only* this contract; any server implementing it
-is a valid task source. We ship **two source apps**, each a configured instance of the same Task
-Manager pointed at a different base URL:
+**Restructure (decided):** tasks are **purged from core** — `task_t`, fetching, parsing, and the
+task-list formatting all live in **apps**, not the firmware core (§11.2). Core provides only
+*task-agnostic* facilities the apps build on: a **generic scrollable list widget** (also used by the
+Launcher/Settings) and a **generic async job service** (so an app can fetch off the UI task without
+spawning its own task, §6A.2). The shared abstraction between source apps is just the **`task_t`
+model + the list formatting**, kept thin per-app (decided: "generic list in core + thin per-app").
 
-- **App: "Yapp"** → **`yapp-server`**, which implements the contract on top of **Todoist** (reusing
-  the existing `~/yapp-cli` code). The `todomark`-on-hardware experience.
-- **App: "Local"** → a **platform-agnostic LAN box** that implements the same contract over whatever
-  it likes (local DB, file, custom system — not Todoist). The device neither knows nor cares.
+Two source apps, **each fetching its own way**:
+- **App: "Yapp"** (`~/yappcloud`) → talks **directly to Todoist** over HTTPS (no proxy, decided): the
+  device hits `api.todoist.com` with the user's token, parses Todoist's JSON into `task_t`. The
+  `todomark`-on-hardware experience, no server to run.
+- **App: "Local"** (`~/yapplocal`) → a **platform-agnostic LAN box** speaking the simple device
+  contract (§8.1) over whatever it likes (local DB, file, custom system — not Todoist).
 
-This keeps the device decoupled from any vendor; future sources cost nothing on the firmware side.
+So the old "one REST contract for *both* sources" is relaxed: the contract (§8.1) is now **just the
+Local source's interface**; Yapp bypasses it and speaks Todoist directly. The device stays decoupled
+(any app can add a source); core stays vendor- and task-agnostic.
 
-### 8.1 The device-facing contract (the "known endpoints")
-Every source — `yapp-server` and the LAN box alike — exposes:
+> **Why direct Todoist is OK on the C3:** ESP-IDF's `esp_crt_bundle` (Mozilla roots) + `esp_http_client`
+> + `esp-tls` do TLS 1.2; a session costs ~40–50 KB heap *during* the fetch and we hold ~190 KB free
+> (leak-test watermark). The app opens the TLS connection, fetches, parses into the bounded `task_t`
+> array, and tears the session down — not holding it. Response size is capped (`TASKMASTER_MAX_TASKS`).
+
+### 8.1 The Local-source contract (the "known endpoints") — yapplocal only
+The **Local** source (`~/yapplocal`) exposes a small REST contract; the device's Local app speaks it.
+(Yapp does **not** — it talks to Todoist directly, §8.) Any LAN server implementing this is a valid
+Local source:
 ```
 GET  /tasks         → { "tasks":[ { id, title(≤N), priority(1-4), due, parent_id, done } ], "etag" }
 POST /tasks/{id}/complete                          → mark complete
 POST /tasks/{id}/postpone   { "due":"tomorrow" }   → reschedule (optional; 501 if unsupported)
 GET  /health                                       → liveness (shown inline by the app)
 ```
-Rules: flat JSON, server-truncated titles, bounded task count (e.g. ≤50), `priority` normalized to
-1–4 (4 = highest, matching Todoist). `etag` lets the device skip re-rendering unchanged lists.
-Optional endpoints may return `501` and the UI hides that action.
+Rules: flat JSON, server-truncated titles, bounded task count (e.g. ≤`TASKMASTER_MAX_TASKS`),
+`priority` 1–4 (4 = highest, matching Todoist). `etag` lets the app skip re-rendering an unchanged
+list. Optional endpoints may return `501` and the UI hides that action. The contract types + parse
+live in the **Local app** (userspace), not core.
 
-- **`yapp-server`** (≈100 lines Flask/FastAPI) maps the contract onto Todoist via the existing yapp
-  code: `_yapp_common.get_api()` for the client, `todolst.py`'s flatten + priority-sort for `/tasks`,
-  `todomark.py`'s `close_task` for `/complete`. Todoist-library quirks (paginator vs list, completion
-  fallback) stay server-side where they're already solved.
-- **LAN box** implements the same four endpoints however it wants — the contract is the only spec.
+- **Yapp (direct Todoist):** the app calls `GET https://api.todoist.com/rest/v2/tasks` with a Bearer
+  token, and maps Todoist's JSON (`content`, `priority` 1–4, `due.date`, `parent_id`, `is_completed`)
+  into the same `task_t` model. Complete = `POST …/tasks/{id}/close`; postpone = `POST …/tasks/{id}`
+  with `due_string`. The Todoist token is the app's declared config (§9.4).
+- **Local (LAN box)** implements the four endpoints above however it wants — the contract is the spec.
 
 ### 8.2 On-device data model & UI (mirror of `todomark`, source-agnostic)
 The Task Manager renders the contract's model the way `todomark` does, on a 128×64 **mono** screen:
@@ -711,25 +728,27 @@ appropriate for a desktop appliance on a trusted home network. Keep **TLS a comp
 
 ### 8.5 Phase 3 — build plan (UI foundation → sync → Task Manager)
 
-**Theme:** adopt **LVGL** as the UI foundation (decided — §4.4), then make the device *show and act on
-real tasks*: the `yapp-server` proxy + a Local stub, the always-on **sync task** that fills a real
-`task_model_t` over the device contract (§8.1), and the **Task Manager** app registered as two source
-instances ("Yapp" / "Local"), with offline rendering. End state: open a Task Manager → priority-sorted,
-nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cached tasks + `OFFLINE`.
+**Theme:** adopt **LVGL** (Part A, done), then make the device *show and act on real tasks* — but with
+**tasks living entirely in userspace** (§8). Core grows two *task-agnostic* facilities (a generic list
+widget + an async job service); each source **app** does its own fetch/parse into `task_t` and renders
+via the core list. End state: open the Yapp app → it pulls **directly from Todoist** → priority-sorted,
+nested tasks → complete/postpone; the Local app does the same over its LAN contract; Wi-Fi off → cached
+tasks + `OFFLINE`.
 
 > **Order matters:** the UI foundation (Part A) lands *first* — building `app_tasks` on the raw
 > renderer and re-porting it to LVGL later would be wasted work. The existing screens (Launcher,
 > Setup, Hello) migrate to LVGL in Part A so all apps share one look.
 
-#### 8.5.1 New pieces
+#### 8.5.1 New pieces (post-restructure — **core stays task-free**, §8)
 | Piece | Where | Role |
 |---|---|---|
-| `esp_lvgl_port` + `esp_lcd` SH1106 | core managed deps | LVGL on the panel (wraps/replaces raw `sh1106.c`) |
-| `ui` frame | `taskmaster_core/ui/` | OS-drawn LVGL frame: optional **right hint bar** (20px, 3 boxes) + content area; **no status bar** (§6) |
-| `task_model` (real) | `taskmaster_core/` | Fixed `task_t tasks[TASKMASTER_MAX_TASKS]` filled by parse (§6A.1), mutex-guarded |
-| `source_client` + `sync_task` | `taskmaster_core/net/` | `esp_http_client` GET/POST over the contract; the one always-on §5.2 writer |
-| Task Manager capability | `taskmaster_core` | Reusable source_client + render helpers; thin per-source app components live in `~/yappcloud` / `~/yapplocal` (§11.2) |
-| `yappcloud` / `yapplocal` | **own repos** (host + app) | Contract over Todoist via `~/yapp-cli`; canned-task LAN stub. Each = host server + device app (§11.2) |
+| LVGL (`lvgl/lvgl`) | core managed dep | LVGL on the panel via the `sh1106` framebuffer (done, Part A) |
+| `ui_frame` | `taskmaster_core` | OS frame: optional right hint bar + content area (done, Part A) |
+| **`ui_list`** (generic) | `taskmaster_core` | **Task-agnostic** scrollable/selectable list widget — used by Launcher, Settings, and app task lists |
+| **`async_job`** (generic) | `taskmaster_core` | **Task-agnostic** worker service: submit work off the UI task → result delivered on the UI task; cancel-on-app-exit (§6A) |
+| `task_t` + parse + render | **app side** (`~/yappcloud`, `~/yapplocal`) | The task model, fetch, JSON parse, and task→list formatting — **not in core** |
+| `~/yapplocal` | own repo (host + app) | LAN box over the §8.1 contract + the Local device app |
+| `~/yappcloud` | own repo (**app only**) | The Yapp device app talking **directly to Todoist** — no host server (proxy dropped) |
 
 #### 8.5.2 Build order — Part A: LVGL UI foundation
 1. **LVGL bring-up.** ✅ **Done.** LVGL **9.4** (`lvgl/lvgl` managed dep) driven onto the panel
@@ -760,72 +779,63 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
    the **hint-bar-off / full-width** mode. Verified on hardware: all Phase 0–2 flows work in LVGL.
    *(Priority/nesting glyphs land with the Task Manager in Part B.)*
 
-#### 8.5.3 Build order — Part B: sync + Task Manager (on LVGL)
-5. **Contract + model types.** ✅ **Done.** `task_t` (`id`, `parent_id`, `title`, `due`, `priority`,
-   `done`) with named size bounds (`TASKMASTER_MAX_TASKS`=50, `TASK_TITLE_MAX`, …) and the JSON
-   shape/`etag` documented in `task_model.h` (§8.1). The model now holds a **fixed `task_t` array**
-   (no per-task malloc, §6A.1; ~5.7 KB) with mutex-guarded writer (`task_model_set_tasks/_sync`) and
-   reader (`task_model_copy`, `task_model_get`) accessors (§5.2). The cJSON parser into this array is
-   host-unit-testable and lands in step 7.
-6. **Host source servers (in their own repos).** ✅ **Done.** Each task source is a self-contained
-   **product in its own git repo** (apps live outside core — §11.2): **`~/yappcloud`** maps the contract
-   onto **Todoist** (reuses `~/yapp-cli`'s `get_api` + the `todolst.py` paginator/priority handling) and
-   **`~/yapplocal`** serves canned tasks from an in-memory store. Both are Python-stdlib `http.server`
-   (no deps for local; `todoist-api-python` for cloud) implementing `GET /tasks` (etag, priority-sorted,
-   title-truncated, `parent_id` nesting), `POST …/complete`, `POST …/postpone`, `GET /health`. Verified
-   with `curl` — local end-to-end, cloud against a real Todoist account (contract-valid). The device app
-   component for each source lands in the *same* repo at step 11.
-6.5. **App-declared config facility (§9.4).** ✅ **Done.** `app_config` registry +
-   `app_cfg_field_t`/`app_cfg_group_t` + `TASKMASTER_REGISTER_APP_CONFIG`. The provisioning form
-   (§7A.5) now assembles a **core section (Wi-Fi/OTA)** + **one section per installed app's
-   `ACFG_PASTE` fields** (named `cfg.<ns>.<key>`), and `POST /save` routes those into each app's
-   `app_store` namespace. **Removed `yapp_url/token`, `local_url/token` from `nvs_config`** — core
-   keeps only Wi-Fi + `fw_url` + settings. Verified on hardware: `app_hello` declares a `name` field →
-   boot logs `cfg[hello] 'Hello' x1`; the app greets with the pasted name. (`ACFG_KNOB` scalars wire
-   into Settings at Phase 4.) App-author docs in `docs/APP_API.md` §7. This unblocks the source apps
-   (step 11) declaring their own URL/token instead of core hardcoding them.
-7. **`source_client` — fetch + parse.** GET `/tasks` (URL+token passed in by the active app from its
-   `app_store` config, §9.4 — *not* read from core NVS) into a bounded buffer; parse with **cJSON**
-   straight into the fixed array under the mutex; free the cJSON tree immediately (§6A.1); honor
-   `etag`. Drive against the LAN stub; log parsed tasks.
-8. **`sync_task` — the §5.2 writer.** Always-on: fetch on active-source select + every ~5 min +
-   on-demand "Sync now"; honors `WIFI_EN`/`net_status` (idle when offline); sets `sync_state`
-   (CONNECTING/SYNCING/OK/ERROR) and notifies the UI via task-notification.
-9. **Task Manager — render (read-only).** `app_tasks`: priority-sorted, **nested** via `parent_id`
-   (`↳` indent), scrollable LVGL list, right hint bar (from Part A) + inline Wi-Fi/sync glyphs, empty state
-   "No open tasks 🎉". Reads the model through the locking accessor (§5.2).
-10. **Task Manager — actions.** *Select* = complete (`POST /complete`, optimistic remove, reflect next
-    sync); *encoder click* = detail submenu (View description / Postpone / Sync now); *Postpone* =
-    `POST /postpone` (hidden if 501). Re-publish hints per mode (§6).
-11. **Two source apps, one per repo (Yapp + Local).** Now that apps live in their own repos (§11.2),
-    the Task Manager is **not** one component registered twice. Instead **core provides the reusable
-    Task Manager capability** (the `source_client`, the §8.5.2 rendering helpers, the contract types) as
-    a stable API, and each source repo (**`~/yappcloud`**, **`~/yapplocal`**) ships a **thin app
-    component** that binds it to a `task_source_t {name, url_key, token_key}` and registers
-    (`TASKMASTER_REGISTER_APP`). Each reads its URL+token from NVS (§9.2); a source with **no URL stays
-    hidden**. The active app selects the source the `sync_task` polls. (This keeps the heavy logic in
-    one place — core — while sources version independently, §11.2.)
-12. **Offline + write semantics.** `WIFI_EN=0` / dropped link → **cached** tasks + `OFFLINE`, "Sync now"
-    unavailable, writes **queued** to replay on reconnect (final call here). One path shared with a
-    dropped connection (§8.3).
-13. **Harden + §6A.4 gate.** Bounded buffers, capped task count, `etag` correctness, source-down →
-    status-bar error over cached data; run the leak harness on `app_tasks` incl. **Home fired
-    mid-fetch** (the case §6A.4 targets, now that a real fetch exists).
+#### 8.5.3 Build order — Part B: tasks in userspace (restructured per §8)
+Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★/6★ below.
+
+- **5★ — task model: move OUT of core.** Step 5 built `task_model.[ch]` *in core*; the restructure
+  (§8) makes tasks userspace, so the `task_t` types + model move to the apps (or their thin shared
+  copy). Core's `task_model` is **removed**, and the Launcher's inline `sync` indicator (task-specific)
+  is **removed**. `net_status` stays in core (connectivity is universal). *(`task_t` fields/bounds from
+  step 5 are reused verbatim, just relocated.)*
+- **6★ — host servers: drop the Yapp proxy.** `~/yapplocal`'s LAN server stays. **`~/yappcloud`'s
+  `yapp_server` proxy is dropped** (Yapp now talks to Todoist directly, §8) — that repo becomes
+  app-only.
+- **6.5 — App-declared config facility (§9.4).** ✅ **Done** (unchanged by the restructure).
+
+7. **Core: generic `ui_list` widget (task-agnostic).** A scrollable, selectable list: feed it rows
+   (text + optional leading glyph + indent level), it handles the scroll window, selection highlight,
+   and wrap. **Refactor the Launcher to use it** (it hand-rolls a list today), proving it's generic.
+   Settings and the app task lists reuse it. No task concepts in it.
+8. **Core: generic `async_job` service (task-agnostic).** `async_job_submit(work_fn, ctx, done_fn)` →
+   runs `work_fn` on a **core-owned worker task**, delivers the result to `done_fn` **on the UI task**;
+   `async_job_cancel()` on app `exit()` so a fetch in flight can't write into freed app memory (§6A —
+   this is how apps do background I/O *without* spawning their own tasks, §6A.2). Apps stay
+   single-threaded, so an app's `task_t` model is **UI-task-only → no mutex**.
+9. **App-side task model + render (thin, per app).** Each source app defines its `task_t[]` (bounded,
+   §6A.1) and a `render` that formats tasks into `ui_list` rows: priority glyph (`P1..P4`), `parent_id`
+   nesting (indent), due on the selected line, empty state "No open tasks 🎉". Shared by convention
+   (small), not via core.
+10. **Local app (yapplocal): fetch over the LAN contract.** `async_job` → `esp_http_client` GET
+    `/tasks` (base URL from app config, §9.4) → cJSON parse into `task_t[]` (free the tree immediately,
+    §6A.1) → render via `ui_list`. *Select* = complete (`POST …/complete`, optimistic); detail submenu
+    = Postpone / Sync now (`POST …/postpone`, hidden on 501). No URL configured → app stays hidden.
+11. **Yapp app (yappcloud): fetch Todoist directly (HTTPS).** `async_job` → `esp_http_client` + `esp-tls`
+    + `esp_crt_bundle` → `GET https://api.todoist.com/rest/v2/tasks` with the Bearer token (app config,
+    §9.4) → parse Todoist JSON into the same `task_t[]` → render. Complete = `POST …/tasks/{id}/close`;
+    postpone = `POST …/tasks/{id}` `due_string`. Open→fetch→parse→**close the TLS session** (don't hold
+    it). No token → app hidden.
+12. **Offline + write semantics.** `WIFI_EN=0` / dropped link → render **cached** `task_t[]` + an
+    `OFFLINE` marker, "Sync now" unavailable, writes **queued** (bounded) to replay on reconnect — one
+    path for both off-by-toggle and dropped (§8.3). Each app owns its cache (userspace).
+13. **Harden + §6A.4 gate.** Bounded buffers, capped task count, source-down → error over cached data;
+    run the leak harness on each source app incl. **Home fired mid-fetch** — now the real case, since
+    `async_job_cancel()` on `exit()` is exactly what prevents the worker writing into freed memory.
 
 #### 8.5.4 Design decisions / defaults (revisit if needed)
-- **LVGL: 1-bit, single partial buffer, trimmed**; `render()` stays drawing-library-agnostic so a
-  perf-critical screen could drop to raw `esp_lcd` later (§4.4).
-- **One shared `sync_task`, never app-owned** (§6A.2); the active Task Manager *selects* the source.
-- **One `task_model`, refreshed per active source** (not two models); app switch triggers a re-sync.
-- **Two-instance registration** = one component, two `device_app_t` + thin wrapper callbacks over
-  shared logic (the no-context-pointer C pattern).
-- **Optimistic writes**, offline writes **queued** (bounded), confirmed on next sync.
+- **Tasks are userspace; core stays task-free** (§8). Core's only task-enabling additions are the
+  *generic* `ui_list` + `async_job` — neither knows what a task is.
+- **No app-owned tasks** (§6A.2 holds): background I/O goes through core `async_job`; results land on
+  the UI task, so app models need **no mutex**.
+- **Yapp = direct Todoist** (no proxy); **Local = LAN contract** (§8.1). `task_t` is the shared model;
+  fetch/parse differ per app.
+- **Optimistic writes**, offline writes **queued** (bounded), confirmed on next fetch.
 
 #### 8.5.5 Exit criteria (§14 Phase 3)
-LVGL is the UI foundation (all Phase 0–2 screens ported, leak-clean); tasks display priority-sorted
-with nesting (mirrors `todomark`) within one sync cycle; Wi-Fi + sync shown inline (no status bar);
-complete + postpone work and reflect on next sync; the "Local" app works against the stub;
-**Wi-Fi-off shows cached tasks + `OFFLINE`**; `app_tasks` passes the §6A.4 leak gate.
+LVGL is the UI foundation (Phase 0–2 screens ported, leak-clean); **core is task-free** (no `task_t`/
+sync in core); the **Yapp app pulls directly from Todoist** and the **Local app over its LAN contract**,
+both showing priority-sorted, nested tasks via the generic `ui_list`; complete + postpone work;
+**Wi-Fi-off shows cached tasks + `OFFLINE`**; each source app passes the §6A.4 leak gate (incl.
+Home-mid-fetch via `async_job_cancel`).
 
 ---
 
@@ -1095,7 +1105,7 @@ headers, §6) and the **device REST contract** (§8.1).
 | **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
 | **2 — Provisioning portal** ✅ | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
-| **3 — UI foundation + Sync + Task Manager** ◀ next | **Adopt LVGL** (decided, §8.5 Part A): port the Launcher/Setup/Hello screens + screen-owned-widget lifecycle; then `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline, §8.3) | LVGL is the UI foundation (Phase 0–2 screens ported, leak-clean); tasks display priority-sorted with nesting (mirrors `todomark`); Wi-Fi/sync shown inline; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
+| **3 — UI foundation + userspace tasks** ◀ next | LVGL UI foundation (done, Part A); then **tasks in userspace** (§8): core gains generic `ui_list` + `async_job`, **task model/sync purged from core**; the **Yapp app pulls Todoist directly** (no proxy) + the **Local app** over its LAN contract; offline honors `WIFI_EN` | LVGL is the UI foundation (ported, leak-clean); **core is task-free**; both source apps show priority-sorted, nested tasks via the generic list; complete/postpone work; **Wi-Fi-off shows cached tasks + OFFLINE**; each app passes the §6A.4 leak gate |
 | **4 — Settings + power** | Build the **Settings hub** (§6) — absorbs Wi-Fi setup as a menu item (removes the interim standalone Setup app, §7A.4) + device info / factory reset / restart / OTA-stub; idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Settings menu navigates; Wi-Fi setup opens the portal and boot auto-opens it when unprovisioned; startup target, deep-sleep toggle, timeout persist and take effect; screen blanks on idle; **system reaches light sleep when idle** |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
