@@ -11,12 +11,24 @@
 
 #include "esp_err.h"
 
-/* One-time Wi-Fi stack init (netif + default event loop + esp_wifi). Idempotent. */
+/* One-time Wi-Fi stack init: both netifs + default event loop + esp_wifi + STA
+ * event handlers. Idempotent. Call once at boot before any start_*. */
 esp_err_t wifi_mgr_init(void);
 
 /* Start Station mode and connect from NVS creds. Drives net_status; retries on
  * disconnect. Returns ESP_ERR_INVALID_STATE if no SSID is configured. */
 esp_err_t wifi_mgr_start_sta(void);
 
-/* Stop Wi-Fi and power the radio down (sets NET_WIFI_OFF). */
+/* Raise the SoftAP (always AP+STA so the STA iface stays available for scanning
+ * and an existing STA link is preserved). Used by the provisioning portal. */
+void wifi_mgr_ap_start(const char *ssid);
+
+/* Drop the SoftAP, returning to STA-only (if a station link is up) or idle. */
+void wifi_mgr_ap_stop(void);
+
+/* Re-derive net_status from the current STA link (CONNECTED+rssi / DISCONNECTED).
+ * Call after dropping the AP to restore the connectivity indicator. */
+void wifi_mgr_refresh_status(void);
+
+/* Stop Wi-Fi entirely and power the radio down (sets NET_WIFI_OFF). */
 esp_err_t wifi_mgr_stop(void);

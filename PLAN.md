@@ -529,8 +529,14 @@ boot when unprovisioned.
 - `render()` — instructional only: network name, `192.168.4.1`, and a live status line
   (Waiting → Connecting → Saved ✓ → Error). The knob never enters characters.
 - `on_event()` — minimal (e.g. Select = rescan APs); the phone drives the flow.
-- `exit()` — **total teardown (§6A):** stop the HTTP server + SoftAP (`provisioning_stop()`) and
-  **restore the prior Wi-Fi state** (back to STA / honor `WIFI_EN`). Must be leak-clean (7A.7).
+- `exit()` — **total teardown (§6A):** stop the HTTP server + SoftAP and **restore the prior Wi-Fi
+  state** via `wifi_mgr_refresh_status()` (a live STA link is preserved across the AP cycle). Must be
+  leak-clean (7A.7). *(Done in step 7.)*
+
+> **Step 7 unified the Wi-Fi init:** `wifi_mgr` is now the single owner of `esp_wifi_*` and coordinates
+> mode from two independent wants (STA / AP → AP+STA). `softap_portal` is just the captive HTTP + DNS
+> on top. This is what lets the Setup app raise the AP **while a station link stays up** — verified on
+> hardware: STA connected → AP+STA up (no STA drop) → AP down → STA still connected.
 
 ### 7A.5 The form: GET → scan → POST → validate → commit
 1. `GET /` (+ captive wildcard) → one page **generated from the schema** (7A.2): an `<input>` per

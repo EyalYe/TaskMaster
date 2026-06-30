@@ -33,6 +33,7 @@ void app_main(void)
     task_model_init();
     net_status_init();
     ESP_ERROR_CHECK(config_init());
+    ESP_ERROR_CHECK(wifi_mgr_init());   /* one Wi-Fi init shared by STA + the portal */
 
     if (sh1106_init() != ESP_OK) {
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");

@@ -9,6 +9,7 @@
 #include "app_setup.h"
 
 #include "softap_portal.h"
+#include "wifi_mgr.h"
 #include "net_status.h"
 #include "sh1106.h"
 #include "esp_log.h"
@@ -45,11 +46,11 @@ static void setup_render(void)
 static void setup_exit(void)
 {
     if (s_portal_up) {
-        softap_portal_stop();
+        softap_portal_stop();      /* drops the AP; any prior STA link is kept */
         s_portal_up = false;
     }
-    /* Step 7 will restore a prior STA link here when re-provisioned. */
-    net_status_set(NET_DISCONNECTED, 0);
+    /* Restore the connectivity indicator from the (possibly still-connected) STA. */
+    wifi_mgr_refresh_status();
     ESP_LOGI(TAG, "exit: portal down");
 }
 

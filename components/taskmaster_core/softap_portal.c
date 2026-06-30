@@ -1,5 +1,6 @@
 #include "softap_portal.h"
 #include "nvs_config.h"
+#include "wifi_mgr.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -7,8 +8,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_wifi.h"
-#include "esp_event.h"
-#include "esp_netif.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_timer.h"
@@ -17,7 +16,6 @@
 
 static const char *TAG = "portal";
 
-static bool             s_inited;    /* stack/netif/wifi_init done once */
 static httpd_handle_t   s_server;
 static TaskHandle_t     s_dns_task;
 static volatile bool    s_dns_run;
@@ -281,32 +279,10 @@ static void dns_task(void *arg)
 
 esp_err_t softap_portal_start(void)
 {
-    if (!s_inited) {
-        ESP_ERROR_CHECK(esp_netif_init());
-        esp_err_t e = esp_event_loop_create_default();
-        if (e != ESP_ERR_INVALID_STATE) {       /* tolerate already-created */
-            ESP_ERROR_CHECK(e);
-        }
-        esp_netif_create_default_wifi_ap();
-        esp_netif_create_default_wifi_sta();   /* STA iface enables /scan + validate */
-        wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
-        ESP_ERROR_CHECK(esp_wifi_init(&init));
-        s_inited = true;
-    }
-
-    wifi_config_t ap = {
-        .ap = {
-            .ssid = SOFTAP_SSID,
-            .ssid_len = strlen(SOFTAP_SSID),
-            .channel = 1,
-            .max_connection = 4,
-            .authmode = WIFI_AUTH_OPEN,
-        },
-    };
-    /* AP+STA: keep the AP up for the phone while the STA iface scans / validates. */
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    /* The radio + AP+STA mode is owned by wifi_mgr (so an existing STA link is kept
+     * when re-provisioning from the Launcher, §7A step 7). The portal is just the
+     * captive HTTP server + DNS on top. */
+    wifi_mgr_ap_start(SOFTAP_SSID);
     ESP_LOGI(TAG, "SoftAP '%s' up (open), join then browse http://%s", SOFTAP_SSID, SOFTAP_IP);
 
     start_http_server();
@@ -322,7 +298,7 @@ esp_err_t softap_portal_stop(void)
         s_server = NULL;
     }
     s_dns_run = false;          /* dns_task closes its socket and self-deletes ≤0.5s */
-    esp_wifi_stop();            /* AP down; stack left initialized for a restart */
+    wifi_mgr_ap_stop();         /* drop the AP, keep any STA link (back to STA-only) */
     ESP_LOGI(TAG, "portal stopped");
     return ESP_OK;
 }
