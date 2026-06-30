@@ -30,9 +30,9 @@ TASKMASTER_REGISTER_APP_CONFIG("hello", "Hello", HELLO_CFG);
 #include <stdio.h>
 
 #define HELLO_TITLE_ROW   0
-#define HELLO_PROMPT_ROW  2
-#define HELLO_COUNT_ROW   3
-#define HELLO_NET_ROW     5
+#define HELLO_PROMPT_ROW  1
+#define HELLO_COUNT_ROW   2
+#define HELLO_NET_ROW     3
 #define HELLO_LINE_MAX    24
 
 static const char *TAG = "app.hello";
