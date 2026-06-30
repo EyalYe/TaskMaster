@@ -6,6 +6,7 @@ idf_component_register(
         "net_status.c"
         "nvs_config.c"
         "app_store.c"
+        "app_config.c"
         "wifi_mgr.c"
         "app_setup.c"
         "leak_test.c"

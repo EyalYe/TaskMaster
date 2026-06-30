@@ -216,5 +216,43 @@ default, so you never special-case "first run". Notes:
   out others (and even provisioning); per-app budget enforcement is a deferred item (PLAN §14 Phase 6).
 
 Writes commit immediately, so prefer writing on real changes / in `exit()` rather than every frame
-(NVS is flash). A user-facing setting that should appear in the device **Settings** UI is a separate,
-future facility (PLAN §9.3) — `app_store` is for app-internal state, the common case.
+(NVS is flash). `app_store` is for app-**internal** state. To get user-supplied config (a server URL,
+a token, a preference) **into** your namespace, declare it — see §7.
+
+## 7. User config — let the OS fill it for you (`app_config.h`)
+
+Your app shouldn't hardcode a server URL or token, and **core must not know about them** (that's what
+keeps core and apps independent). Instead you **declare** the config you need, and the OS adds it to
+the provisioning form / Settings automatically — assembling Wi-Fi (core) + every installed app's
+fields. The values land in **your `app_store` namespace**, so you read them with the `app_store_get_*`
+from §6.
+
+```c
+#include "app_config.h"
+
+static const app_cfg_field_t MYAPP_CFG[] = {
+    { .key="url",   .label="Server URL", .type=ACFG_STR, .input=ACFG_PASTE, .max_len=96  },
+    { .key="token", .label="API token",  .type=ACFG_STR, .input=ACFG_PASTE, .secret=true, .max_len=128 },
+    { .key="every", .label="Sync min",   .type=ACFG_U16, .input=ACFG_KNOB,  .min=1, .max=60 },
+};
+TASKMASTER_REGISTER_APP_CONFIG("myapp", "MyApp", MYAPP_CFG);   // ns, display name, fields
+```
+
+Then read it where you need it (the `ns` is the same one you pass to `app_store_open`):
+
+```c
+char url[97];
+app_store_get_str(&store, "url", url, sizeof(url), "");   // "" until the user sets it
+if (!url[0]) { /* not configured yet — show a hint, stay out of the way */ }
+```
+
+**Two input methods** (the device never lets you type strings on the knob):
+- **`ACFG_PASTE`** — strings/secrets (URLs, tokens). Appear in the **paste-from-phone form**; the user
+  pastes them. Re-editable only by re-opening that form.
+- **`ACFG_KNOB`** — scalars (`ACFG_U8/U16/BOOL`) with `min`/`max`. **Knob-editable in Settings.**
+
+Notes:
+- `secret: true` masks the field (password input). Use it for tokens.
+- The `ns`/`key` strings must not contain `.` (the form encodes fields as `cfg.<ns>.<key>`).
+- A field the user hasn't set reads as your default — handle "not configured yet" gracefully (e.g. a
+  source app with no URL simply stays hidden in the Launcher).

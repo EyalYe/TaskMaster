@@ -775,13 +775,15 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
    title-truncated, `parent_id` nesting), `POST …/complete`, `POST …/postpone`, `GET /health`. Verified
    with `curl` — local end-to-end, cloud against a real Todoist account (contract-valid). The device app
    component for each source lands in the *same* repo at step 11.
-6.5. **App-declared config facility (§9.4) — prerequisite for independent apps.** Build the `app_config`
-   registry + `app_cfg_field_t` + `TASKMASTER_REGISTER_APP_CONFIG`; make the provisioning form (§7A.5)
-   assemble core (Wi-Fi/OTA) + per-app `ACFG_PASTE` sections and route `POST /save` into each app's
-   `app_store` namespace; **remove `yapp_url/token`, `local_url/token` from `nvs_config`** (§9.2).
-   Knob-editable `ACFG_KNOB` fields wire into Settings when it's built (Phase 4). Verify with the
-   `app_hello` test app declaring a dummy field. This unblocks the source apps (step 11) declaring their
-   own URL/token instead of core hardcoding them.
+6.5. **App-declared config facility (§9.4).** ✅ **Done.** `app_config` registry +
+   `app_cfg_field_t`/`app_cfg_group_t` + `TASKMASTER_REGISTER_APP_CONFIG`. The provisioning form
+   (§7A.5) now assembles a **core section (Wi-Fi/OTA)** + **one section per installed app's
+   `ACFG_PASTE` fields** (named `cfg.<ns>.<key>`), and `POST /save` routes those into each app's
+   `app_store` namespace. **Removed `yapp_url/token`, `local_url/token` from `nvs_config`** — core
+   keeps only Wi-Fi + `fw_url` + settings. Verified on hardware: `app_hello` declares a `name` field →
+   boot logs `cfg[hello] 'Hello' x1`; the app greets with the pasted name. (`ACFG_KNOB` scalars wire
+   into Settings at Phase 4.) App-author docs in `docs/APP_API.md` §7. This unblocks the source apps
+   (step 11) declaring their own URL/token instead of core hardcoding them.
 7. **`source_client` — fetch + parse.** GET `/tasks` (URL+token passed in by the active app from its
    `app_store` config, §9.4 — *not* read from core NVS) into a bounded buffer; parse with **cJSON**
    straight into the fixed array under the mutex; free the cJSON tree immediately (§6A.1); honor

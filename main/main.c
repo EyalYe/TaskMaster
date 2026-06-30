@@ -12,6 +12,7 @@
 #include "sh1106.h"
 #include "input.h"
 #include "app_manager.h"
+#include "app_config.h"
 #include "app_setup.h"
 #include "task_model.h"
 #include "net_status.h"
@@ -48,6 +49,13 @@ void app_main(void)
     ESP_LOGI(TAG, "Registered apps: %u", app_manager_count());
     for (unsigned i = 0; i < app_manager_count(); i++) {
         ESP_LOGI(TAG, "  app[%u] = %s", i, app_manager_get(i)->name);
+    }
+
+    /* App-declared config groups (§9.4) — what the form/Settings will assemble. */
+    ESP_LOGI(TAG, "App config groups: %u", app_config_group_count());
+    for (unsigned i = 0; i < app_config_group_count(); i++) {
+        const app_cfg_group_t *g = app_config_group(i);
+        ESP_LOGI(TAG, "  cfg[%s] '%s' x%u", g->ns, g->name, g->count);
     }
 
     /* Read Home before input_init() so a held button at reset forces setup. */

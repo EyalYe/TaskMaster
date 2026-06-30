@@ -1,5 +1,7 @@
 #include "softap_portal.h"
 #include "nvs_config.h"
+#include "app_config.h"
+#include "app_store.h"
 #include "wifi_mgr.h"
 
 #include <string.h>
@@ -16,15 +18,22 @@
 
 static const char *TAG = "portal";
 
+#define WIFI_SSID_BUF   33     /* 32-char SSID + NUL */
+#define SAVE_BODY_MAX   4096   /* max POST /save body */
+#define DNS_TASK_STACK  4096
+#define DNS_TASK_PRIO   5
+
 static httpd_handle_t   s_server;
 static TaskHandle_t     s_dns_task;
 static volatile bool    s_dns_run;
 
-/* --- Setup form: generated from the config schema (PLAN §7A.5) --- */
-/* One <input> per provisioning-path field; secrets become password fields; the
- * SSID field gets a datalist populated by /scan. Field names == NVS keys, so the
- * POST handler (step 6) maps name→key directly. Served for ANY path so captive
- * probes land on it. */
+/* --- Setup form: core (Wi-Fi/OTA) section + one section per installed app's
+ * ACFG_PASTE fields (PLAN §7A.5/§9.4). Core fields are named by their NVS key;
+ * app fields are named "cfg.<ns>.<key>" so POST /save routes them to app_store.
+ * Secrets become password fields; the SSID field gets a /scan datalist. Served
+ * for ANY path so captive probes land on it. --- */
+static const char *INPUT_STYLE = "style=\"width:100%;box-sizing:border-box\"";
+
 static esp_err_t form_get(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
@@ -36,6 +45,8 @@ static esp_err_t form_get(httpd_req_t *req)
         "<form method=post action=/save>");
 
     char row[256];
+
+    /* Core section: Wi-Fi + OTA (the only provisioning-path fields in nvs_config). */
     for (unsigned i = 0; i < config_field_count(); i++) {
         const cfg_field_t *f = config_field(i);
         if (f->write_path != CFG_WP_PROVISION) {
@@ -44,10 +55,35 @@ static esp_err_t form_get(httpd_req_t *req)
         const char *type = f->secret ? "password" : "text";
         const char *list = (strcmp(f->key, "wifi_ssid") == 0) ? " list=aps" : "";
         snprintf(row, sizeof(row),
-            "<label>%s<br><input name=%s type=%s maxlength=%u%s "
-            "style=\"width:100%%;box-sizing:border-box\"></label><br><br>",
-            f->label, f->key, type, f->max_len, list);
+            "<label>%s<br><input name=%s type=%s maxlength=%u%s %s></label><br><br>",
+            f->label, f->key, type, f->max_len, list, INPUT_STYLE);
         httpd_resp_sendstr_chunk(req, row);
+    }
+
+    /* App sections: each installed app's ACFG_PASTE fields (core names no app). */
+    for (unsigned g = 0; g < app_config_group_count(); g++) {
+        const app_cfg_group_t *grp = app_config_group(g);
+        bool any = false;
+        for (unsigned k = 0; k < grp->count; k++) {
+            if (grp->fields[k].input == ACFG_PASTE) { any = true; break; }
+        }
+        if (!any) {
+            continue;
+        }
+        snprintf(row, sizeof(row), "<h3 style=\"margin:.5em 0\">%s</h3>", grp->name);
+        httpd_resp_sendstr_chunk(req, row);
+        for (unsigned k = 0; k < grp->count; k++) {
+            const app_cfg_field_t *f = &grp->fields[k];
+            if (f->input != ACFG_PASTE) {
+                continue;
+            }
+            const char *type = f->secret ? "password" : "text";
+            snprintf(row, sizeof(row),
+                "<label>%s<br><input name=\"" APP_CFG_FORM_PREFIX "%s.%s\" type=%s maxlength=%u %s>"
+                "</label><br><br>",
+                f->label, grp->ns, f->key, type, f->max_len, INPUT_STYLE);
+            httpd_resp_sendstr_chunk(req, row);
+        }
     }
 
     httpd_resp_sendstr_chunk(req,
@@ -146,7 +182,7 @@ static void schedule_reboot(void)
 static esp_err_t save_post(httpd_req_t *req)
 {
     int total = req->content_len;
-    if (total <= 0 || total > 4096) {
+    if (total <= 0 || total > SAVE_BODY_MAX) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
     }
     char *body = malloc(total + 1);
@@ -164,16 +200,35 @@ static esp_err_t save_post(httpd_req_t *req)
     }
     body[got] = '\0';
 
-    /* key=value&… — write each provisioning field straight to its NVS key. */
+    /* key=value&… — route each field: core keys → nvs_config; "cfg.<ns>.<key>"
+     * (§9.4) → the app's app_store namespace. */
     int n_set = 0;
-    char ssid[33] = {0};
+    char ssid[WIFI_SSID_BUF] = {0};
     char *save = NULL;
+    const size_t prefix_len = strlen(APP_CFG_FORM_PREFIX);
     for (char *tok = strtok_r(body, "&", &save); tok; tok = strtok_r(NULL, "&", &save)) {
         char *eq = strchr(tok, '=');
         if (!eq) continue;
         *eq = '\0';
         char *key = tok, *val = eq + 1;
         url_decode(val);
+
+        if (strncmp(key, APP_CFG_FORM_PREFIX, prefix_len) == 0) {
+            /* App field "cfg.<ns>.<key>" → app_store(ns).set(key, val). */
+            char *ns = key + prefix_len;
+            char *dot = strchr(ns, '.');
+            if (!dot) continue;
+            *dot = '\0';
+            char *akey = dot + 1;
+            app_store_t st;
+            if (app_store_open(&st, ns) == ESP_OK) {
+                app_store_set_str(&st, akey, val);
+                app_store_close(&st);
+                n_set++;
+            }
+            continue;
+        }
+
         const cfg_field_t *f = config_find(key);
         if (f && f->write_path == CFG_WP_PROVISION) {
             config_set_str(key, val);
@@ -287,7 +342,7 @@ esp_err_t softap_portal_start(void)
 
     start_http_server();
     s_dns_run = true;
-    xTaskCreate(dns_task, "dns", 4096, NULL, 5, &s_dns_task);
+    xTaskCreate(dns_task, "dns", DNS_TASK_STACK, NULL, DNS_TASK_PRIO, &s_dns_task);
     return ESP_OK;
 }
 

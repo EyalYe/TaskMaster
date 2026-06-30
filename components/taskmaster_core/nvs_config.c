@@ -16,12 +16,9 @@ static const char *TAG = "config";
 /* The schema — single source of truth (mirrors §9.2). Order = form field order. */
 static const cfg_field_t s_schema[] = {
     /* key            type      write-path         secret  max  label                  defN  defS */
+    /* Core fields only — NO app config here (apps declare their own, §9.4). */
     { "wifi_ssid",   CFG_STR,  CFG_WP_PROVISION,  false,   32, "Wi-Fi SSID",            0, ""    },
     { "wifi_psk",    CFG_STR,  CFG_WP_PROVISION,  true,    64, "Wi-Fi password",        0, ""    },
-    { "yapp_url",    CFG_STR,  CFG_WP_PROVISION,  false,   96, "Yapp source URL",       0, ""    },
-    { "yapp_token",  CFG_STR,  CFG_WP_PROVISION,  true,   128, "Yapp token",            0, ""    },
-    { "local_url",   CFG_STR,  CFG_WP_PROVISION,  false,   96, "Local source URL",      0, ""    },
-    { "local_token", CFG_STR,  CFG_WP_PROVISION,  true,   128, "Local token",           0, ""    },
     { "fw_url",      CFG_STR,  CFG_WP_PROVISION,  false,   96, "OTA firmware URL",      0, ""    },
     { "startup_tgt", CFG_STR,  CFG_WP_SETTINGS,   false,   16, "Startup target",        0, ""    },
     { "wifi_en",     CFG_U8,   CFG_WP_SETTINGS,   false,    0, "Wi-Fi enabled",         1, NULL  },
@@ -206,14 +203,14 @@ bool config_selftest(void)
     /* Save originals for the two keys we exercise, restore at the end. */
     char saved_url[97];
     uint16_t saved_to = 0;
-    config_get_str("yapp_url", saved_url, sizeof(saved_url));
+    config_get_str("fw_url", saved_url, sizeof(saved_url));
     config_get_u16("idle_to_s", &saved_to);
 
     /* 1) string round-trip */
     const char *probe = "http://selftest:8000";
     char back[97] = {0};
-    ok &= (config_set_str("yapp_url", probe) == ESP_OK);
-    ok &= (config_get_str("yapp_url", back, sizeof(back)) == ESP_OK);
+    ok &= (config_set_str("fw_url", probe) == ESP_OK);
+    ok &= (config_get_str("fw_url", back, sizeof(back)) == ESP_OK);
     ok &= (strcmp(back, probe) == 0);
 
     /* 2) numeric round-trip */
@@ -233,7 +230,7 @@ bool config_selftest(void)
     ok &= (config_get_u8("wifi_en", &en) == ESP_OK);   /* default 1 if never set */
 
     /* restore */
-    config_set_str("yapp_url", saved_url);
+    config_set_str("fw_url", saved_url);
     config_set_u16("idle_to_s", saved_to);
 
     ESP_LOGI(TAG, "selftest: %s", ok ? "PASS" : "FAIL");

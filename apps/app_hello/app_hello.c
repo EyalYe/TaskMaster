@@ -14,9 +14,18 @@
 #include "ui_frame.h"
 #include "net_status.h"
 #include "app_store.h"
+#include "app_config.h"
 #include "esp_log.h"
 
 static const control_hints_t HELLO_HINTS = { .rotate = "+/-", .click = "RST", .select = "RST" };
+
+/* Declared config (§9.4): a paste-only "name" the provisioning form will collect
+ * into this app's app_store namespace ("hello"). Proves the facility end to end. */
+#define HELLO_NAME_MAX 24
+static const app_cfg_field_t HELLO_CFG[] = {
+    { .key = "name", .label = "Your name", .type = ACFG_STR, .input = ACFG_PASTE, .max_len = HELLO_NAME_MAX },
+};
+TASKMASTER_REGISTER_APP_CONFIG("hello", "Hello", HELLO_CFG);
 
 #include <stdio.h>
 
@@ -56,7 +65,18 @@ static void hello_render(void)
 {
     char line[HELLO_LINE_MAX];
     lv_obj_clean(ui_frame_content());          /* blank slate, then rebuild */
-    ui_text_row(HELLO_TITLE_ROW, "Hello app");
+
+    /* Greet using the name pasted via the provisioning form (§9.4), if set. */
+    char name[HELLO_NAME_MAX + 1] = {0};
+    char greet[sizeof("Hi, ") + HELLO_NAME_MAX];
+    app_store_get_str(&s_store, "name", name, sizeof(name), "");
+    if (name[0]) {
+        snprintf(greet, sizeof(greet), "Hi, %s", name);
+        ui_text_row(HELLO_TITLE_ROW, greet);
+    } else {
+        ui_text_row(HELLO_TITLE_ROW, "Hello app");
+    }
+
     ui_text_row(HELLO_PROMPT_ROW, "Turn the knob:");
     snprintf(line, sizeof(line), " count = %d", s_counter);
     ui_text_row(HELLO_COUNT_ROW, line);
