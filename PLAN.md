@@ -379,10 +379,14 @@ Two classes share the one `device_app_t` interface:
     (`config_factory_reset()`).
   - **Restart** — soft reboot (`esp_restart`) for recovery without unplugging.
   - **OTA update** — pull a signed image from `fw_url` (Phase 4.5; a stub/"coming soon" until then).
+  - **Per-app config** — for each installed app that declared config (§9.4): its **`ACFG_KNOB`**
+    scalars are knob-editable here (with bounds), and its **`ACFG_PASTE`** strings/tokens are shown
+    masked with a **"re-provision"** shortcut that opens the Wi-Fi-setup form (no knob typing). Core
+    names no app — these sections come from the `app_config` registry.
   - (Room to grow: brightness, sync interval — same settings-schema pattern.)
   Behavior settings persist to NVS immediately on change (§9). **Boundary:** Settings owns
-  network/device/system; *task* sources live in the Task Manager apps (§8).
-  Each setting persists to NVS immediately on change (§9).
+  network/device/system + the *editing surface* for app-declared config (§9.4); the app config's
+  *meaning* (and the task sources themselves) live in the app repos (§11.2).
 - **Pomodoro (user app, Phase 5):** a bundled *removable* example that proves the framework for
   third-party devs (no network needed).
 
@@ -575,10 +579,13 @@ boot when unprovisioned.
 > hardware: STA connected → AP+STA up (no STA drop) → AP down → STA still connected.
 
 ### 7A.5 The form: GET → scan → POST → validate → commit
-1. `GET /` (+ captive wildcard) → one page **generated from the schema** (7A.2): an `<input>` per
-   provisioning-path key, secrets as password fields, SSID with a `<datalist>` from a scan.
+1. `GET /` (+ captive wildcard) → one page **assembled dynamically**: a **core section** (Wi-Fi
+   SSID/password from the scan, OTA `fw_url`) **+ one section per installed app** of its `ACFG_PASTE`
+   fields (§9.4), secrets as password fields, SSID with a `<datalist>`. Core names no app — the app
+   sections come from the `app_config` registry.
 2. `GET /scan` → JSON of nearby APs (`esp_wifi_scan_*`) to populate the SSID picker.
-3. `POST /save` → parse the url-encoded body → write each field to NVS.
+3. `POST /save` → parse the url-encoded body → route each field: `wifi_*`/`fw_url` → `nvs_config`;
+   `cfg.<ns>.<key>` → the app's `app_store` namespace (§9.4).
 4. **Save → respond → reboot → connect** (revised — see note): require a non-empty `wifi_ssid`, set
    `provisioned=1`, return a "Saved, restarting to connect" page, then `esp_restart()` after the
    response flushes. On reboot the boot-mode branch (§7A.3) connects as a station.
@@ -768,7 +775,15 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
    title-truncated, `parent_id` nesting), `POST …/complete`, `POST …/postpone`, `GET /health`. Verified
    with `curl` — local end-to-end, cloud against a real Todoist account (contract-valid). The device app
    component for each source lands in the *same* repo at step 11.
-7. **`source_client` — fetch + parse.** GET `/tasks` into a bounded buffer; parse with **cJSON**
+6.5. **App-declared config facility (§9.4) — prerequisite for independent apps.** Build the `app_config`
+   registry + `app_cfg_field_t` + `TASKMASTER_REGISTER_APP_CONFIG`; make the provisioning form (§7A.5)
+   assemble core (Wi-Fi/OTA) + per-app `ACFG_PASTE` sections and route `POST /save` into each app's
+   `app_store` namespace; **remove `yapp_url/token`, `local_url/token` from `nvs_config`** (§9.2).
+   Knob-editable `ACFG_KNOB` fields wire into Settings when it's built (Phase 4). Verify with the
+   `app_hello` test app declaring a dummy field. This unblocks the source apps (step 11) declaring their
+   own URL/token instead of core hardcoding them.
+7. **`source_client` — fetch + parse.** GET `/tasks` (URL+token passed in by the active app from its
+   `app_store` config, §9.4 — *not* read from core NVS) into a bounded buffer; parse with **cJSON**
    straight into the fixed array under the mutex; free the cJSON tree immediately (§6A.1); honor
    `etag`. Drive against the LAN stub; log parsed tasks.
 8. **`sync_task` — the §5.2 writer.** Always-on: fetch on active-source select + every ~5 min +
@@ -867,26 +882,29 @@ ota_1      ~1.9MB  — app slot B
   **rolls back** if the app fails to self-confirm (`esp_ota_mark_app_valid_cancel_rollback`).
 - **Dev flashing** stays `idf.py flash` over USB-C; OTA is the field path.
 
-### 9.2 NVS config schema — every field populated *only* via Settings or the provisioning form
+### 9.2 Core NVS config schema — **core fields only** (no app config; §9.4)
+The core schema holds **only universal device/system config** — never anything app-specific (app
+config is app-declared, §9.4, so core never names an app):
+
 | Key | Type | Size | Source | Purpose |
 |---|---|---|---|---|
 | `wifi_ssid` | str | 32B | provisioning | Target AP SSID |
 | `wifi_psk` | str | 64B | provisioning | WPA2 PSK |
-| `yapp_url` | str | 96B | provisioning | `yapp-server` base URL → "Yapp" app |
-| `yapp_token` | str | 128B | provisioning | Auth token for `yapp-server` |
-| `local_url` | str | 96B | provisioning | LAN-box base URL → "Local" app |
-| `local_token` | str | 128B | provisioning | Auth token for the LAN box (optional) |
-| `fw_url` | str | 96B | provisioning | OTA firmware image URL (optional) |
+| `fw_url` | str | 96B | provisioning | OTA firmware image URL (optional; OTA is core) |
 | `startup_tgt` | u8/str | 16B | settings | Boot target (§8A) |
 | `wifi_en` | u8 | 1B | settings | Wi-Fi master on/off — radio off for battery/offline (§8A); default on |
 | `deep_sleep` | u8 | 1B | settings | Deep-sleep toggle (§8A) |
 | `idle_to_s` | u16 | 2B | settings | Inactivity timeout seconds (0 = off) |
 | `provisioned` | u8 | 1B | system | Boot flag → Launcher vs. first-run provisioning |
 
+> **Removed (was wrong):** `yapp_url/token`, `local_url/token` — those are **app** config and now live
+> with their apps (declared via §9.4, stored in each app's `app_store` namespace). Core mentioning a
+> specific app's fields broke the core⟂userspace split (§11.2).
+
 Native `nvs_flash` handles wear-leveling. **Declarative schema, not hand-wired keys:** one table
 (key, type, label, max-len, secret?, write-path) drives both the generated provisioning form and the
-NVS read/write. Adding a future field = one row. Two write paths: provisioning form (secrets/URLs)
-and the Settings app (behavior). Optionally enable **NVS encryption** for the secret keys (§10).
+NVS read/write. `provisioned` is gated only on `wifi_ssid` (app config is optional). Optionally enable
+**NVS encryption** for the secret keys (§10).
 
 ### 9.3 App-owned storage (`app_store.h`) — config a third-party dev *can* add
 
@@ -917,11 +935,48 @@ app_store_set_u32(&store, "work", 30);              // persisted immediately
   are asked to be **frugal** (small config/state, not bulk data; docs/APP_API.md). Today nothing stops
   a greedy app from crowding out others or provisioning; **per-app budget enforcement + partition
   sizing are deferred to Phase 6** (§14).
-- **Two tiers, on purpose:** `nvs_config` = device config that drives the **setup form** (core only);
-  `app_store` = app-internal state (any app). A *future* third facility (**Phase 6**, §14) would let an
-  app **register a user-facing setting** that appears in the Settings UI — self-registered schema rows
-  namespaced by app id, mirroring app registration (§6.1). Not built yet; `app_store` covers
-  app-private data, which is the common case.
+- **Two tiers + a declared overlay:** `nvs_config` = core device config (core only, §9.2); `app_store`
+  = app-internal state (any app). The **app-declared config** below (§9.4) is a thin *overlay* on
+  `app_store` — the app marks some of its namespace keys as user-fillable so the OS form/Settings can
+  populate them. The values still live in the app's `app_store` namespace; the app reads them the same
+  way. (Pulled forward from the old "Phase 6 facility" — it's foundational to the repo split, §11.2.)
+
+### 9.4 App-declared configuration (the OS fills it; core never names an app)
+**The rule:** core's provisioning form and Settings hold only **Wi-Fi + OTA `fw_url`** (§9.2). Every
+other knob — a source URL, an API token, an app preference — is **declared by the app that needs it**,
+and the OS assembles the form/Settings from Wi-Fi + whatever each *installed* app contributes. Add an
+app → its fields appear; remove it → they vanish; **core mentions no app**.
+
+**Declare (app side, at boot — mirrors app registration, §6.1):**
+```c
+static const app_cfg_field_t YAPP_CFG[] = {
+    { .key="url",   .label="Server URL", .type=ACFG_STR,  .input=ACFG_PASTE, .max_len=96  },
+    { .key="token", .label="API token",  .type=ACFG_STR,  .input=ACFG_PASTE, .secret=true, .max_len=128 },
+    { .key="sync_min", .label="Sync min", .type=ACFG_U16, .input=ACFG_KNOB, .min=1, .max=60 },
+};
+TASKMASTER_REGISTER_APP_CONFIG("yapp", "Yapp", YAPP_CFG);   /* ns, display name, fields */
+```
+
+**Two input methods (respects the no-typing-on-the-knob rule, §7):**
+- **`ACFG_PASTE`** — string/secret fields (URLs, tokens). Appear in the **paste-from-phone form**
+  (§7A.5), never typed on the knob. The only way to set them on-device is re-opening the form.
+- **`ACFG_KNOB`** — scalar fields (bool / enum / number). Knob-editable directly in **Settings** (§6),
+  with bounds (`min`/`max`/enum list). Never in the paste form.
+
+**Mechanism:**
+- A small core registry (`app_config`) collects `{ns, name, fields[]}` from each app's boot
+  constructor — exactly like the app registry. `app_config_group_count()/group(i)` iterate it.
+- **Form (§7A.5):** core Wi-Fi/OTA section + one section per app of its `ACFG_PASTE` fields, inputs
+  named `cfg.<ns>.<key>`. `POST /save` routes `wifi_*`/`fw_url` → `nvs_config`, and each `cfg.<ns>.<key>`
+  → `app_store_open(ns)` + set. **Storage reuses the app's `app_store` namespace** (decided) — no new
+  store.
+- **Settings (§6):** iterates the same groups, rendering `ACFG_KNOB` fields as knob-editable entries
+  and listing `ACFG_PASTE` fields (masked) with a **"re-provision"** shortcut that opens the form.
+- **App reads** its config with the `app_store_get_*` it already uses (`app_store_get_str(ns,"url")`).
+  A source with **no URL stays hidden** in the Launcher (§8.5).
+
+This is the clean core⟂userspace boundary (§11.2): the *only* core knowledge is "apps may declare
+config"; the *what* lives entirely in each app's repo.
 
 ---
 
@@ -1042,7 +1097,8 @@ headers, §6) and the **device REST contract** (§8.1).
 | **4 — Settings + power** | Build the **Settings hub** (§6) — absorbs Wi-Fi setup as a menu item (removes the interim standalone Setup app, §7A.4) + device info / factory reset / restart / OTA-stub; idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Settings menu navigates; Wi-Fi setup opens the portal and boot auto-opens it when unprovisioned; startup target, deep-sleep toggle, timeout persist and take effect; screen blanks on idle; **system reaches light sleep when idle** |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
-| **6 — App-ecosystem hardening** *(when a real third-party ecosystem materializes)* | Make the app platform safe to host untrusted apps: **per-app NVS budget enforcement** + `nvs` partition sizing (§9.3); namespace-**collision hardening** beyond docs; **app-declared user-facing settings** in the Settings UI (self-registered schema rows, §9.3); broader app sandboxing as needed | Apps can't exhaust NVS or crowd out core/provisioning; an app can surface its own setting in Settings without core edits; collisions detected, not just documented |
+| **6 — App-ecosystem hardening** *(when a real third-party ecosystem materializes)* | Make the app platform safe to host untrusted apps: **per-app NVS budget enforcement** + `nvs` partition sizing (§9.3); namespace-**collision hardening** beyond docs; broader app sandboxing as needed | Apps can't exhaust NVS or crowd out core/provisioning; collisions detected, not just documented |
+| | *(App-declared config in the form/Settings — formerly here — was pulled forward to Phase 3 (§9.4) as it's foundational to the core⟂userspace split.)* | |
 
 Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP. Phase 6 = app-ecosystem hardening (deferred until
 third-party apps are a real concern).
