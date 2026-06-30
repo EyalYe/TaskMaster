@@ -11,6 +11,8 @@ idf_component_register(
         "leak_test.c"
         "hint_bar.c"
         "lvgl_disp.c"
+        "lv_font_tm5x7.c"
+        "ui_frame.c"
         "launcher.c"
         "ui.c"
         "sh1106.c"
@@ -18,10 +20,12 @@ idf_component_register(
         "softap_portal.c"
     INCLUDE_DIRS "include"          # public API: app.h, app_manager.h, task_model.h, net_status.h, nvs_config.h, app_store.h, launcher.h, ui.h, sh1106.h, input.h, softap_portal.h, board_pins.h
     PRIV_INCLUDE_DIRS "."           # private: font5x7.h next to sh1106.c
-    # public deps: headers in include/ pull these in (board_pins.h→gpio, input.h→freertos)
+    # public deps: headers in include/ pull these in (board_pins.h→gpio, input.h→freertos,
+    # ui_frame.h/lvgl_disp.h→lvgl)
     REQUIRES
         esp_driver_gpio
         freertos
+        lvgl
     # private deps: used only in the .c files
     PRIV_REQUIRES
         esp_driver_i2c
@@ -32,5 +36,4 @@ idf_component_register(
         lwip
         nvs_flash
         esp_timer
-        lvgl
 )
