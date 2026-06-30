@@ -145,10 +145,11 @@ real on 400KB SRAM + Wi-Fi, so budget for it:
 - Keep the app framework's `render()` contract drawing-library-agnostic so a perf-critical screen
   could drop to raw `esp_lcd` later.
 
-> **Adoption timing (decided):** LVGL is **deferred to Phase 3** (Task Manager). The **Phase 1
-> Launcher renders on the existing raw `sh1106` text renderer** — this proves the app framework and
-> clean app-switch first, and moves the LVGL/SRAM-budget risk to where there's real UI to justify it.
-> Because `render()` is library-agnostic, the Launcher's raw renderer and a later LVGL app coexist.
+> **Adoption timing (decided):** LVGL was **deferred to Phase 3** and is now **adopted as Phase 3's
+> first step** (§8.5 Part A) — the UI foundation lands before `app_tasks`, and the Phase 0–2 screens
+> (Launcher, Setup, Hello), which used the raw `sh1106` text renderer through Phase 2, are ported to
+> LVGL then. Deferring proved the app framework + clean app-switch first and moved the LVGL/SRAM-budget
+> risk to where there's real UI to justify it.
 
 ### 4.5 Provisioning is now a solved path (the big win of moving to ESP-IDF)
 SoftAP + `esp_http_server` + a DNS captive portal are **mature, heavily-used ESP-IDF features**, and
@@ -684,6 +685,89 @@ appropriate for a desktop appliance on a trusted home network. Keep **TLS a comp
 
 **Stretch goal:** an app that talks to Todoist directly (TLS + larger buffers) once MVP is proven.
 
+### 8.5 Phase 3 — build plan (UI foundation → sync → Task Manager)
+
+**Theme:** adopt **LVGL** as the UI foundation (decided — §4.4), then make the device *show and act on
+real tasks*: the `yapp-server` proxy + a Local stub, the always-on **sync task** that fills a real
+`task_model_t` over the device contract (§8.1), and the **Task Manager** app registered as two source
+instances ("Yapp" / "Local"), with offline rendering. End state: open a Task Manager → priority-sorted,
+nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cached tasks + `OFFLINE`.
+
+> **Order matters:** the UI foundation (Part A) lands *first* — building `app_tasks` on the raw
+> renderer and re-porting it to LVGL later would be wasted work. The existing screens (Launcher,
+> Setup, Hello) migrate to LVGL in Part A so all apps share one look.
+
+#### 8.5.1 New pieces
+| Piece | Where | Role |
+|---|---|---|
+| `esp_lvgl_port` + `esp_lcd` SH1106 | core managed deps | LVGL on the panel (wraps/replaces raw `sh1106.c`) |
+| `ui` frame | `taskmaster_core/ui/` | OS-drawn LVGL frame: status bar (top) + hint strip (bottom) + app content area |
+| `task_model` (real) | `taskmaster_core/` | Fixed `task_t tasks[TASKMASTER_MAX_TASKS]` filled by parse (§6A.1), mutex-guarded |
+| `source_client` + `sync_task` | `taskmaster_core/net/` | `esp_http_client` GET/POST over the contract; the one always-on §5.2 writer |
+| `app_tasks` | `apps/app_tasks/` | Task Manager user app — registered **twice** (Yapp + Local) |
+| `yapp_server` + Local stub | `proxy/` (host) | Contract over Todoist via `~/yapp-cli`; canned-task stub for "Local" + tests |
+
+#### 8.5.2 Build order — Part A: LVGL UI foundation
+1. **LVGL bring-up.** Add `esp_lvgl_port` + an `esp_lcd` SH1106 panel (mind the 2-px column offset).
+   Configure LVGL: **1-bit (`I1`)** color depth, one **partial** draw buffer, monochrome theme,
+   Kconfig-trim unused widgets/fonts (§4.4). Pump `lv_timer_handler` from the UI task on events +
+   while animating. Smoke test: a label on the OLED.
+2. **OS UI frame.** An LVGL layer the OS owns: top **status bar** (source • Wi-Fi • sync glyphs, from
+   `net_status`/`sync_state`) + bottom **hint strip** (`control_hints_t` / `ui_set_hints()`, §6), with a
+   middle **content container** apps draw into. Status bar auto-updates on `EV_SYS_NET_CHANGED`.
+3. **Screen-owned lifecycle (§6A).** Each app gets its own LVGL screen; `init()` builds widgets parented
+   to it; `exit()` = delete that screen → frees the whole tree in one call (the §6A "owned-by-screen"
+   rule becomes real). `app_manager`/`ui` create+load the app screen on switch, delete on exit. **Re-run
+   the §6A.4 leak gate** now that apps hold real widgets.
+4. **Port existing screens.** Rebuild the **Launcher** as an LVGL list (selection highlight + wrap),
+   and port **Hello** + the **Setup/Wi-Fi** screen. Add a fuller font (lowercase!) + glyphs (priority
+   `P1–P4`, nesting `↳`, Wi-Fi/sync). Verify all of Phase 0–2 still works on hardware, now in LVGL.
+
+#### 8.5.3 Build order — Part B: sync + Task Manager (on LVGL)
+5. **Contract + model types.** Finalize `task_t` (`id`, `title[N]`, `priority` 1–4, `due`, `parent_id`,
+   `done`), `TASKMASTER_MAX_TASKS`, JSON shape + `etag` (§8.1); extend `task_model.h` with the array +
+   copy-out accessors. Pure parse is **host-unit-testable**.
+6. **`yapp_server` + Local stub (host).** `GET /tasks` (flatten + priority-sort from Todoist via
+   `todolst.py`), `POST …/complete` (`todomark.py` `close_task`), `POST …/postpone` (or 501),
+   `GET /health`. Local stub returns canned tasks. Verify both with `curl`.
+7. **`source_client` — fetch + parse.** GET `/tasks` into a bounded buffer; parse with **cJSON**
+   straight into the fixed array under the mutex; free the cJSON tree immediately (§6A.1); honor
+   `etag`. Drive against the LAN stub; log parsed tasks.
+8. **`sync_task` — the §5.2 writer.** Always-on: fetch on active-source select + every ~5 min +
+   on-demand "Sync now"; honors `WIFI_EN`/`net_status` (idle when offline); sets `sync_state`
+   (CONNECTING/SYNCING/OK/ERROR) and notifies the UI via task-notification.
+9. **Task Manager — render (read-only).** `app_tasks`: priority-sorted, **nested** via `parent_id`
+   (`↳` indent), scrollable LVGL list, status bar + hint strip (from Part A), empty state
+   "No open tasks 🎉". Reads the model through the locking accessor (§5.2).
+10. **Task Manager — actions.** *Select* = complete (`POST /complete`, optimistic remove, reflect next
+    sync); *encoder click* = detail submenu (View description / Postpone / Sync now); *Postpone* =
+    `POST /postpone` (hidden if 501). Re-publish hints per mode (§6).
+11. **Two source instances (Yapp + Local).** Register `app_tasks` **twice** — one component, two
+    `device_app_t` with distinct static state bound to a `task_source_t {name, url_key, token_key}`
+    (thin per-instance wrapper callbacks; `device_app_t` has no ctx). Each reads its URL+token from NVS
+    (§9.2). A source with **no URL stays hidden**. The active app selects the source `sync_task` polls.
+12. **Offline + write semantics.** `WIFI_EN=0` / dropped link → **cached** tasks + `OFFLINE`, "Sync now"
+    unavailable, writes **queued** to replay on reconnect (final call here). One path shared with a
+    dropped connection (§8.3).
+13. **Harden + §6A.4 gate.** Bounded buffers, capped task count, `etag` correctness, source-down →
+    status-bar error over cached data; run the leak harness on `app_tasks` incl. **Home fired
+    mid-fetch** (the case §6A.4 targets, now that a real fetch exists).
+
+#### 8.5.4 Design decisions / defaults (revisit if needed)
+- **LVGL: 1-bit, single partial buffer, trimmed**; `render()` stays drawing-library-agnostic so a
+  perf-critical screen could drop to raw `esp_lcd` later (§4.4).
+- **One shared `sync_task`, never app-owned** (§6A.2); the active Task Manager *selects* the source.
+- **One `task_model`, refreshed per active source** (not two models); app switch triggers a re-sync.
+- **Two-instance registration** = one component, two `device_app_t` + thin wrapper callbacks over
+  shared logic (the no-context-pointer C pattern).
+- **Optimistic writes**, offline writes **queued** (bounded), confirmed on next sync.
+
+#### 8.5.5 Exit criteria (§14 Phase 3)
+LVGL is the UI foundation (all Phase 0–2 screens ported, leak-clean); tasks display priority-sorted
+with nesting (mirrors `todomark`) within one sync cycle; status bar reflects real Wi-Fi + sync;
+complete + postpone work and reflect on next sync; the "Local" app works against the stub;
+**Wi-Fi-off shows cached tasks + `OFFLINE`**; `app_tasks` passes the §6A.4 leak gate.
+
 ---
 
 ## 8A. Power, Sleep & Startup Behavior (Settings-driven, battery-ready)
@@ -888,7 +972,7 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 | **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
 | **2 — Provisioning portal** ✅ | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
-| **3 — Sync + Task Manager** ◀ next | `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline mode, §8.3) | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
+| **3 — UI foundation + Sync + Task Manager** ◀ next | **Adopt LVGL** (decided, §8.5 Part A): port the Launcher/Setup/Hello screens + screen-owned-widget lifecycle; then `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline, §8.3) | LVGL is the UI foundation (Phase 0–2 screens ported, leak-clean); tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
 | **4 — Settings + power** | Build the **Settings hub** (§6) — absorbs Wi-Fi setup as a menu item (removes the interim standalone Setup app, §7A.4) + device info / factory reset / restart / OTA-stub; idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Settings menu navigates; Wi-Fi setup opens the portal and boot auto-opens it when unprovisioned; startup target, deep-sleep toggle, timeout persist and take effect; screen blanks on idle; **system reaches light sleep when idle** |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |

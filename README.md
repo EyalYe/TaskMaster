@@ -148,8 +148,10 @@ idf.py -B build_leak -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" \
 > ESP-IDF v6.0 note: the GPIO/I²C drivers live in `esp_driver_gpio` / `esp_driver_i2c` (the old
 > monolithic `driver` component is gone) — reflected in the component `CMakeLists.txt` files.
 
-## Next: Phase 3 — sync + Task Manager
+## Next: Phase 3 — UI foundation + sync + Task Manager
 
-Stand up the `yapp-server` proxy and the two source apps ("Yapp" / "Local") over one device REST
-contract: fetch tasks, render priority-sorted with nesting (mirroring `todomark`), complete/postpone,
-and offline rendering when Wi-Fi is off. See [`PLAN.md`](PLAN.md) §8.
+First **adopt LVGL** as the UI foundation (port the Launcher/Setup/Hello screens to it,
+screen-owned-widget lifecycle), then stand up the `yapp-server` proxy and the two source apps
+("Yapp" / "Local") over one device REST contract: fetch tasks, render priority-sorted with nesting
+(mirroring `todomark`), complete/postpone, and offline rendering when Wi-Fi is off. Full stepped plan
+in [`PLAN.md`](PLAN.md) §8.5.
