@@ -23,6 +23,9 @@ void sh1106_pixel(int x, int y, int on);
  * Each glyph is 6px wide (5 + 1 spacing). */
 void sh1106_text(int x, int row, const char *s);
 
+/* Same, but at an arbitrary pixel y (for centering in boxes). Glyph is 7px tall. */
+void sh1106_text_at(int x, int y, const char *s);
+
 /* Clear one 8px text row and draw `s` into it (handy for live status lines). */
 void sh1106_text_line(int row, const char *s);
 

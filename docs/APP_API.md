@@ -60,7 +60,7 @@ need a mutex for your own state. Key rules:
 - **`exit()` must be total and idempotent** — free everything `init()` *could* have allocated,
   regardless of how far it got, because **Home can fire at any moment** (see §3).
 - **Render is on-demand**, not a frame loop: the platform calls `render()` after each input event and
-  whenever platform status you display changes (see §4). Draw from your current state each time.
+  whenever platform status you display changes (see §5). Draw from your current state each time.
 
 ## 3. Input events (`on_event`)
 
@@ -72,11 +72,78 @@ EV_SELECT,                       // Select button
 // EV_HOME is OS-reserved — it returns to the Launcher and is NEVER delivered to your app.
 ```
 
-After `on_event` returns, the platform calls your `render()`. The contextual **hint strip** lets you
-label the three app-usable controls — call `ui_set_hints()` from `init()` and on mode changes
-(PLAN §6).
+After `on_event` returns, the platform calls your `render()`. To label what the controls do, use the
+**control hint bar** — see §4.
 
-## 4. Reading platform status — connectivity
+## 4. Screen & the control hint bar
+
+The display is a **128×64 monochrome** OLED. Your app draws in `render()`.
+
+### Drawing
+
+Today the renderer is the raw `sh1106` framebuffer. **(Phase 3 replaces this with LVGL — the *layout
+contract* below is stable; the exact draw calls will change.)**
+
+```c
+#include "sh1106.h"
+sh1106_clear();                  // clear the framebuffer
+sh1106_text_line(row, "HELLO");  // text on an 8px row (0..7), clears the full-width row first
+sh1106_text(x, row, "X");        // text at pixel-x on an 8px row
+sh1106_text_at(x, y, "X");       // text at an arbitrary pixel (x, y) — for centering
+sh1106_pixel(x, y, 1);           // set (1) / clear (0) one pixel
+sh1106_flush();                  // push the framebuffer to the panel
+```
+
+Font note: the bring-up font is **uppercase + digits/punctuation only** — no lowercase yet (a fuller
+font arrives with LVGL in Phase 3).
+
+### The hint bar (opt-in)
+
+The OS can draw a **vertical control hint bar** down the right edge so the user always sees what the
+knob/Select do *right now*. It's **per-app and optional** because screen space is scarce:
+
+- **Use it** → the OS draws a **21px-wide** right column; your content area is the **left 107×64**.
+- **Skip it** → you own the **full 128×64**.
+
+Geometry constants are in `hint_bar.h` (`HINT_BAR_X`, `HINT_BAR_W`, `CONTENT_W`) — lay out content
+against `CONTENT_W` when you show the bar.
+
+Three boxes, top → bottom:
+
+| Box | Control | Who sets it |
+|---|---|---|
+| top | **Home** | OS-fixed — always "back to Launcher"; you never set it |
+| middle | **Encoder** — split into rotate (top cell) / push (bottom cell) | you |
+| bottom | **Select** | you |
+
+Declare your control labels (≤3 chars; glyphs in the LVGL version):
+
+```c
+#include "hint_bar.h"
+
+static const control_hints_t HINTS = {
+    .rotate = "<>",    // encoder rotate → top cell    (NULL = default ↻)
+    .click  = "OPN",   // encoder push   → bottom cell (NULL = hide)
+    .select = "DON",   // Select button  → bottom box  (NULL = hide)
+};
+```
+
+Show it from `render()` — **interim API**; in LVGL this becomes `ui_set_hints()` and the OS draws the
+bar for you (only the call site changes — `control_hints_t` stays):
+
+```c
+static void my_render(void) {
+    sh1106_clear();
+    // ... draw your content within the left 107px while the bar is shown ...
+    hint_bar_draw(&HINTS);   // the right column
+    sh1106_flush();
+}
+```
+
+An app that wants the whole screen simply **doesn't** call `hint_bar_draw()` and draws across all
+128px. **Home still works** as the physical escape hatch regardless of the bar.
+
+## 5. Reading platform status — connectivity
 
 Connectivity is platform state; read it from one place, no Wi-Fi handling in your app:
 
@@ -103,7 +170,7 @@ Never call `esp_wifi_*` yourself — the radio is owned by core (the network tas
 the Settings `WIFI_EN` toggle). The same `*_get()` + auto-re-render pattern will expose future status
 (battery, sync state) as the platform grows.
 
-## 5. Persisting your own data (`app_store.h`)
+## 6. Persisting your own data (`app_store.h`)
 
 Your app can create and persist its **own** variables — no core edits, no shared schema. Each app gets
 a **private NVS namespace** keyed by an id you choose:

@@ -80,15 +80,14 @@ void sh1106_pixel(int x, int y, int on)
     if (on) *p |= mask; else *p &= ~mask;
 }
 
-static void draw_char(int x, int row, char c)
+static void draw_char_at(int x, int y, char c)
 {
     if (c >= 'a' && c <= 'z') c -= 0x20;          /* uppercase */
     if (c < FONT_FIRST || c > FONT_LAST) c = ' ';
     const uint8_t *g = font5x7[c - FONT_FIRST];
-    int y0 = row * 8;
     for (int col = 0; col < FONT_W; col++) {
         for (int b = 0; b < 7; b++) {
-            sh1106_pixel(x + col, y0 + b, (g[col] >> b) & 1);
+            sh1106_pixel(x + col, y + b, (g[col] >> b) & 1);
         }
     }
 }
@@ -96,7 +95,14 @@ static void draw_char(int x, int row, char c)
 void sh1106_text(int x, int row, const char *s)
 {
     for (; *s && x < OLED_W; s++, x += FONT_W + 1) {
-        draw_char(x, row, *s);
+        draw_char_at(x, row * 8, *s);
+    }
+}
+
+void sh1106_text_at(int x, int y, const char *s)
+{
+    for (; *s && x < OLED_W; s++, x += FONT_W + 1) {
+        draw_char_at(x, y, *s);
     }
 }
 
