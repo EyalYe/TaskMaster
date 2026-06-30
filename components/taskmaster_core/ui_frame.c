@@ -100,6 +100,7 @@ lv_obj_t *ui_text(int x, int y, const char *txt)
 {
     lv_obj_t *l = lv_label_create(s_content);
     lv_obj_set_style_text_color(l, lv_color_white(), 0);
+    lv_obj_set_style_text_font(l, &lv_font_tm_sans, 0);   /* thin proportional content font */
     lv_label_set_text(l, txt ? txt : "");
     lv_obj_set_pos(l, x, y);
     return l;
@@ -108,6 +109,16 @@ lv_obj_t *ui_text(int x, int y, const char *txt)
 lv_obj_t *ui_text_row(int row, const char *txt)
 {
     return ui_text(0, row * UI_ROW_H, txt);
+}
+
+lv_obj_t *ui_text_row_scroll(int row, const char *txt)
+{
+    lv_obj_t *l = ui_text(0, row * UI_ROW_H, txt);
+    /* Constrain to the content width so LVGL knows to scroll an over-long line.
+     * The content container is sized by ui_frame_set_hints() (full or minus bar). */
+    lv_obj_set_width(l, lv_obj_get_width(s_content));
+    lv_label_set_long_mode(l, LV_LABEL_LONG_SCROLL);   /* back-and-forth */
+    return l;
 }
 
 void ui_frame_set_hints(const control_hints_t *h)

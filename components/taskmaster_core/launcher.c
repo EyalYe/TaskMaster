@@ -18,8 +18,8 @@ static const control_hints_t LAUNCHER_HINTS = { .rotate = "<>", .click = "OPN", 
 
 #define LAUNCHER_TITLE_ROW 0
 #define LIST_FIRST_ROW     1
-#define LIST_ROWS          5   /* app list spans rows 1..5 */
-#define LAUNCHER_NET_ROW   (UI_ROWS - 1)   /* inline net/sync on the last row */
+#define LAUNCHER_NET_ROW   (UI_ROWS - 1)             /* inline net/sync on the last row */
+#define LIST_ROWS          (UI_ROWS - 2)             /* rows between title and net */
 #define LAUNCHER_EMPTY_ROW 2
 #define LAUNCHER_LINE_MAX  20  /* max chars per rendered line */
 

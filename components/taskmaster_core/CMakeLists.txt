@@ -11,6 +11,7 @@ idf_component_register(
         "leak_test.c"
         "lvgl_disp.c"
         "lv_font_tm5x7.c"
+        "lv_font_tm_sans.c"
         "ui_frame.c"
         "launcher.c"
         "ui.c"

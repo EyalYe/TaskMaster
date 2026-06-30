@@ -12,12 +12,13 @@
 #pragma once
 
 #include "lvgl.h"
-#include "hint_bar.h"   /* control_hints_t + bar geometry */
+#include "hint_bar.h"        /* control_hints_t + bar geometry */
+#include "lv_font_tm_sans.h" /* content font (TM_SANS_LINE_H) */
+#include "sh1106.h"          /* OLED_H */
 
-/* Content text layout (default UNSCII_8 font). */
-#define UI_ROW_H        9    /* baseline-to-baseline row height */
-#define UI_GLYPH_W      8    /* monospace glyph advance */
-#define UI_ROWS         7    /* rows that fit on the 64px panel (0..UI_ROWS-1) */
+/* Content text layout (DejaVu Sans 11, proportional). */
+#define UI_ROW_H        TM_SANS_LINE_H        /* baseline-to-baseline row height */
+#define UI_ROWS         (OLED_H / UI_ROW_H)   /* rows that fit on the panel (0..UI_ROWS-1) */
 
 void      ui_frame_init(void);                       /* build the frame on the active screen (once) */
 lv_obj_t *ui_frame_content(void);                    /* the content container (parent for app widgets) */
@@ -34,3 +35,7 @@ lv_obj_t *ui_text(int x, int y, const char *txt);
 
 /* Same, positioned at text `row` (0..UI_ROWS-1), x=0 — apps avoid pixel math. */
 lv_obj_t *ui_text_row(int row, const char *txt);
+
+/* Like ui_text_row, but spans the content width and **auto-scrolls** (back/forth)
+ * when the text is wider than the row — for long titles/SSIDs/URLs (§8.2). */
+lv_obj_t *ui_text_row_scroll(int row, const char *txt);

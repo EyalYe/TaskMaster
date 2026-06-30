@@ -18,10 +18,10 @@ static const char *TAG = "app.setup";
 static bool s_portal_up;
 
 #define SETUP_TITLE_ROW   0
-#define SETUP_STEP1_ROW   2
-#define SETUP_SSID_ROW    3
-#define SETUP_STEP2_ROW   4
-#define SETUP_URL_ROW     5
+#define SETUP_STEP1_ROW   1
+#define SETUP_SSID_ROW    2
+#define SETUP_STEP2_ROW   3
+#define SETUP_URL_ROW     4
 
 static void setup_init(void)
 {
@@ -44,9 +44,9 @@ static void setup_render(void)
     ui_frame_set_hints(NULL);
     ui_text_row(SETUP_TITLE_ROW, "Setup / WiFi");
     ui_text_row(SETUP_STEP1_ROW, "1 join wifi:");
-    ui_text_row(SETUP_SSID_ROW,  " " SOFTAP_SSID);
+    ui_text_row_scroll(SETUP_SSID_ROW, " " SOFTAP_SSID);   /* long → scrolls */
     ui_text_row(SETUP_STEP2_ROW, "2 open browser:");
-    ui_text_row(SETUP_URL_ROW,   " " SOFTAP_IP);
+    ui_text_row_scroll(SETUP_URL_ROW, " " SOFTAP_IP);
 }
 
 static void setup_exit(void)
