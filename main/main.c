@@ -14,7 +14,6 @@
 #include "app_manager.h"
 #include "app_config.h"
 #include "app_setup.h"
-#include "task_model.h"
 #include "net_status.h"
 #include "nvs_config.h"
 #include "wifi_mgr.h"
@@ -32,7 +31,6 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    task_model_init();
     net_status_init();
     ESP_ERROR_CHECK(config_init());
     ESP_ERROR_CHECK(wifi_mgr_init());   /* one Wi-Fi init shared by STA + the portal */

@@ -7,7 +7,6 @@
 #include "launcher.h"
 
 #include "app_manager.h"
-#include "task_model.h"
 #include "net_status.h"
 #include "ui_frame.h"
 
@@ -60,13 +59,12 @@ void launcher_render(void)
         }
     }
 
-    /* Inline net/sync indicator (no OS status bar, §6) — kept left of the bar. */
+    /* Inline connectivity indicator (no OS status bar, §6). No task/sync state —
+     * tasks are userspace (§8); core shows only net status. */
     net_status_t ns;
     net_status_get(&ns);
-    task_status_t st;
-    task_model_get(&st);
     char bar[LAUNCHER_LINE_MAX];
-    snprintf(bar, sizeof(bar), "%s %s", net_state_str(ns.state), sync_state_label(st.sync));
+    snprintf(bar, sizeof(bar), "net: %s", net_state_str(ns.state));
     ui_text_row(LAUNCHER_NET_ROW, bar);
 
     ui_frame_set_hints(&LAUNCHER_HINTS);       /* show + label the right bar (§6) */
