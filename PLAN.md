@@ -841,10 +841,13 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
      it does **not** join a worker that could be on a multi-second TLS timeout. The app's result buffer
      is only written by `done_fn` (UI task), so once cancelled, no late write can touch freed app state.
      A `done_fn` that arrives after the app has exited is dropped (core checks the job is still live).
-9. **App-side task model + render (thin, per app).** Each source app defines its `task_t[]` (bounded,
-   §6A.1) and a `render` that formats tasks into `ui_list` rows: priority glyph (`P1..P4`), `parent_id`
-   nesting (indent), due on the selected line, empty state "No open tasks 🎉". Shared by convention
-   (small), not via core.
+9. **App-side task model + render (thin, per app).** ✅ **Done.** `tasks.[ch]` in the app repo: a
+   bounded `task_t[]` (§6A.1) + a `task_view` that formats tasks into `ui_list` rows — priority marker
+   `P1..P4` (P1 = highest) + `parent_id` nesting (indent) + title; empty state "No open tasks". Built +
+   verified in the **Local app** with static canned tasks (priority-sorted, nested, scrolls, fits left
+   of the hint bar). Also fixed `ui_list` to pin rows one-line (width × `UI_ROW_H`): selected scrolls,
+   others ellipsis. `tasks.[ch]` is copied into yappcloud at step 11. *(Due-on-detail moves to the
+   step-10 submenu.)*
 10. **Local app (yapplocal): fetch over the LAN contract.** `async_job` → `esp_http_client` GET
     `/tasks` (base URL from app config, §9.4) → cJSON parse into `task_t[]` (free the tree immediately,
     §6A.1) → render via `ui_list`. *Select* = complete (`POST …/complete`, optimistic); detail submenu
