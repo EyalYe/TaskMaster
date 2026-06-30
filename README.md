@@ -3,45 +3,70 @@
 ESP-IDF / FreeRTOS firmware for a XIAO ESP32-C3 desktop task appliance.
 See [`PLAN.md`](PLAN.md) for the full spec. This README covers the current build.
 
-## Status: Phase 1 — Core OS ✅ (verified on hardware)
+## Status: Phase 2 — Provisioning ✅ (verified on hardware)
 
-A self-contained **OS** for the device: a manifest-driven app framework with a Launcher, run by a
-single UI task. Phases 0–1 are complete and confirmed on a XIAO ESP32-C3.
+A self-contained **OS** for the device — a manifest-driven app framework with a Launcher, run by one
+UI task — that now **provisions itself from a phone** and connects to Wi-Fi. Phases 0–2 are complete
+and confirmed end to end on a XIAO ESP32-C3.
 
-- **Manifest-driven, self-registering apps** — each app is its own component that registers itself
-  (`TASKMASTER_REGISTER_APP`); the core never references an app by name. The enabled set is one
-  editable list, [`main/idf_component.yml`](main/idf_component.yml). Comment a line out and the app
-  isn't built, linked, or shown.
-- **Launcher** — raw-rendered (SH1106) scrollable app list with a cursor, a status bar (Wi-Fi + sync,
-  read from the shared model), and a contextual control-hint line. *(LVGL is deferred to Phase 3.)*
+- **Paste-from-phone provisioning** — boot the device unprovisioned (or hold **Home** at reset) and it
+  raises SoftAP `TaskMaster-Setup` and auto-launches the **Setup** app. Join from a phone, open
+  `192.168.4.1`, and paste the whole config (Wi-Fi SSID/password, source URLs, tokens) into **one
+  form** generated from the config schema, with an SSID picker from a live scan. Save → the device
+  writes NVS, reboots, and connects. Nothing is typed on the knob.
+- **Manifest-driven, self-registering apps** — each user app is its own component that registers
+  itself (`TASKMASTER_REGISTER_APP`); the core never references it by name. The enabled set is one
+  editable list, [`main/idf_component.yml`](main/idf_component.yml). **Core apps** (Launcher, Setup)
+  are built in and non-removable.
 - **App lifecycle on one task** — the UI task owns the active-app pointer and runs
   `init`/`on_event`/`render`/`exit` cooperatively, so app switches are race-free by construction.
-- **Home is OS-reserved** — the dedicated Home button always returns to the Launcher and never reaches
-  an app; teardown is total/idempotent (see [`PLAN.md`](PLAN.md) §6A).
-- **Shared-model skeleton** — one mutex-guarded `task_model_t` (writer/reader ownership boundary built
-  now; populated by the network task in Phase 3).
-- **Connectivity as an app API** — apps read Wi-Fi/network state from one documented place
-  (`net_status.h`: `net_status_get()` / `net_is_online()`) and the platform re-renders them on change;
-  no app touches the radio. See the app-author guide: [`docs/APP_API.md`](docs/APP_API.md).
-- **Provisioning AP still up** — SoftAP `TaskMaster-Setup` + HTTP server (the real config form lands
-  in Phase 2).
+  **Home** is OS-reserved: it always returns to the Launcher and teardown is total/idempotent (§6A).
+- **Single Wi-Fi owner** (`wifi_mgr`) — coordinates STA / AP modes from one init; the Setup app can
+  raise the AP **beside a live station link** (re-provision from the Launcher without dropping Wi-Fi).
+- **Schema-driven config** (`nvs_config`) — one declarative table drives both the setup form and NVS
+  read/write. Plus **per-app private storage** (`app_store`) so any app can persist its own variables
+  with no core edits (see [`docs/APP_API.md`](docs/APP_API.md)).
+- **Connectivity as an app API** (`net_status.h`) — apps read Wi-Fi state from one place
+  (`net_status_get()` / `net_is_online()`) and the platform re-renders them on change; no app touches
+  the radio.
+- **Leak-clean teardown** — a Kconfig-gated harness (`CONFIG_TM_LEAK_TEST`) runs launch→Home→relaunch
+  cycles under comprehensive heap poisoning; both apps pass on hardware (§6A.4 / §7A.7).
 
 > The encoder is GPIO-polled (1 ms Ben-Buxton quadrature decode + button debounce) because the
 > **ESP32-C3 has no PCNT peripheral**. The 1 ms poll moves to interrupt/GPIO-wake at Phase 4 (battery)
 > — see the ⚠ note in [`PLAN.md`](PLAN.md) §14.
 
+## Boot modes (§7A.3)
+
+On boot the device branches on the `provisioned` flag, **Home-held-at-reset**, and the Wi-Fi toggle:
+
+| Condition | Result |
+|---|---|
+| Home held at reset, **or** unprovisioned | Auto-launch **Setup** (SoftAP portal up) |
+| Provisioned + Wi-Fi on | Connect as a **station**, boot to the Launcher |
+| Provisioned + Wi-Fi off | Offline, boot to the Launcher |
+
+Home-held-at-reset is the escape hatch to re-provision even with bad/stale credentials.
+
 ## Architecture
 
 ```
-main/                      thin composition root (app_main) + the app manifest
-  main.c                   NVS → model → OLED → input → SoftAP, then hands off to the UI task
-  idf_component.yml        APP MANIFEST — the editable list of enabled apps
-components/taskmaster_core/ the OS: app framework + platform services
-apps/app_hello/            first self-registering app component (demo)
+main/                          thin composition root: NVS → model → Wi-Fi init →
+  main.c                       OLED → input → boot-mode branch → UI task
+  idf_component.yml            APP MANIFEST — the editable list of user apps
+components/taskmaster_core/    the OS: app framework + platform services
+  app_manager / ui / launcher  registry, the UI task, the raw-rendered launcher
+  app_setup                    Setup/Wi-Fi core app (provisioning portal lifecycle)
+  wifi_mgr / softap_portal     Wi-Fi owner; captive HTTP form + DNS
+  nvs_config / app_store       schema-driven device config; per-app private storage
+  net_status / task_model      connectivity API; the shared task model (stub)
+  sh1106 / input               OLED driver; GPIO encoder + button decode
+  leak_test                    §6A.4 harness (CONFIG_TM_LEAK_TEST)
+apps/app_hello/                example removable user app (demo)
 ```
 
-Apps depend only on the public app API + display; they can live in their own repos and be pulled by a
-`git:` line in the manifest. Adding/removing an app needs **no core edits**.
+User apps depend only on the public API + display and can live in their own repos. Adding/removing one
+needs **no core edits**. App-author guide: [`docs/APP_API.md`](docs/APP_API.md).
 
 ## Wiring (XIAO ESP32-C3)
 
@@ -74,6 +99,16 @@ idf.py -p <PORT> flash monitor         # flash over USB-C + open serial @ 115200
 ```
 Find `<PORT>` with `ls /dev/cu.*` (the XIAO's native USB shows as `/dev/cu.usbmodem*`).
 
+### Provision the device
+
+1. Power on unprovisioned (or hold **Home** at reset). The OLED shows the Setup screen.
+2. Join Wi-Fi **`TaskMaster-Setup`** from a phone/laptop; open **http://192.168.4.1**.
+3. Fill the form (at least Wi-Fi SSID + password) and **Save & Connect**. The device reboots and joins
+   your network; the status bar shows `NET:OK`.
+
+To re-provision later, open **Setup** from the Launcher (or hold **Home** at reset). A `factory reset`
+is available via `config_factory_reset()`.
+
 ### Managing apps
 
 Edit [`main/idf_component.yml`](main/idf_component.yml):
@@ -84,32 +119,37 @@ dependencies:
   # app_clock:
   #   git: https://github.com/somedev/tm-clock.git   # external app, own repo
 ```
-Comment an entry out to disable that app (it won't compile). To disable **every** app, write
+Comment an entry out to disable that app (it won't compile). To disable **every** user app, write
 `dependencies: {}` — an empty `dependencies:` key (all entries commented) is invalid YAML.
 
-## Verify (Phase 1)
+## Verify (Phase 2)
 
-- [x] Serial boot log shows `Registered apps: N` then each `app[i] = <name>`, and `Phase 1 up.`
-- [x] OLED shows the **Launcher**: `TASKMASTER`, the app list with a `>` cursor, status bar, hint line.
-- [x] Encoder moves the cursor; Select / encoder-push enters the highlighted app.
-- [x] Inside the demo app, turning the knob changes its `COUNT`; Select/push resets it.
-- [x] **Home** returns to the Launcher from inside any app (serial: `HOME -> Launcher` + app `exit`).
-- [x] Commenting the app's manifest line (or `dependencies: {}`) removes it from the build.
-- [ ] Leak-clean teardown cycle (PLAN §6A.4) — deferred to **Phase 2**: stood up on a heap-poisoning
-      debug build, then a standing per-app gate.
+- [x] Unprovisioned / Home-held boot auto-launches **Setup**; SoftAP `TaskMaster-Setup` + `192.168.4.1`.
+- [x] The form renders from the schema; the SSID field suggests scanned networks.
+- [x] Saving writes NVS, reboots, and the device **associates with the real AP** (`got IP`, `NET:OK`).
+- [x] Provisioned boot connects as a station; survives power cycle.
+- [x] **Setup is re-enterable** from the Launcher and raises the AP without dropping a live STA link.
+- [x] **Home** returns to the Launcher from any app; Launcher cursor wraps around the list.
+- [x] **Leak-clean teardown** (§6A.4): launch→Home→relaunch cycles return the heap to baseline with
+      heap poisoning on (Hello + Setup pass).
 
 ## Build status
 
 **Compiles clean on ESP-IDF v6.0.1** for `esp32c3` (`idf.py build`) and **runs on hardware**. App image
-≈ 876 KB — 55% free in the 1.9 MB OTA slot. Every successful build is auto-backed-up (timestamped) to
+≈ 871 KB — 54% free in the 1.9 MB OTA slot. Every successful build is auto-backed-up (timestamped) to
 the gitignored `build_backups/`.
+
+To run the leak harness (debug build, off by default):
+```bash
+idf.py -B build_leak -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" \
+       -D SDKCONFIG=sdkconfig.leak build flash monitor
+```
 
 > ESP-IDF v6.0 note: the GPIO/I²C drivers live in `esp_driver_gpio` / `esp_driver_i2c` (the old
 > monolithic `driver` component is gone) — reflected in the component `CMakeLists.txt` files.
 
-## Next: Phase 2 — provisioning portal
+## Next: Phase 3 — sync + Task Manager
 
-A **Setup/Wi-Fi core app** (built-in, non-removable) replaces the placeholder SoftAP page with the
-paste-from-phone setup form — Wi-Fi creds + source URLs + tokens written to NVS in one paste. It
-auto-launches when the device is unprovisioned and is reachable from the Launcher anytime to
-re-provision. Phase 2 also stands up the §6A.4 leak harness. See [`PLAN.md`](PLAN.md) §7.
+Stand up the `yapp-server` proxy and the two source apps ("Yapp" / "Local") over one device REST
+contract: fetch tasks, render priority-sorted with nesting (mirroring `todomark`), complete/postpone,
+and offline rendering when Wi-Fi is off. See [`PLAN.md`](PLAN.md) §8.
