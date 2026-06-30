@@ -10,6 +10,7 @@
 #define UI_LIST_TEXT_MAX 40   /* max chars a row callback may render */
 #define UI_LIST_CURSOR    "> "   /* selected-row prefix */
 #define UI_LIST_NOCURSOR  "  "   /* unselected: same width, keeps text aligned */
+#define UI_LIST_SCROLL_PAD "   " /* trailing pad so a scrolling row clears the edge */
 
 void ui_list_init(ui_list_t *l, int visible_rows)
 {
@@ -61,10 +62,12 @@ void ui_list_draw(const ui_list_t *l, int y0_row, ui_list_text_fn fn, void *ctx)
             fn(idx, item, sizeof(item), ctx);
         }
         /* "> " cursor on the selected row; matching-width spaces otherwise so the
-         * text stays aligned. */
-        char line[sizeof(UI_LIST_CURSOR) + UI_LIST_TEXT_MAX];
-        snprintf(line, sizeof(line), "%s%s",
-                 idx == l->sel ? UI_LIST_CURSOR : UI_LIST_NOCURSOR, item);
+         * text stays aligned. The selected (scrolling) row gets trailing pad so it
+         * scrolls a touch further left before stopping. */
+        char line[sizeof(UI_LIST_CURSOR) + UI_LIST_TEXT_MAX + sizeof(UI_LIST_SCROLL_PAD)];
+        snprintf(line, sizeof(line), "%s%s%s",
+                 idx == l->sel ? UI_LIST_CURSOR : UI_LIST_NOCURSOR, item,
+                 idx == l->sel ? UI_LIST_SCROLL_PAD : "");
         lv_obj_t *row = ui_text(0, (y0_row + r) * UI_ROW_H, line);
         /* Pin to one row (full content width × one line height) so a long row
          * can't run under the hint bar OR wrap into the next row. The selected
