@@ -848,10 +848,14 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
    of the hint bar). Also fixed `ui_list` to pin rows one-line (width × `UI_ROW_H`): selected scrolls,
    others ellipsis. `tasks.[ch]` is copied into yappcloud at step 11. *(Due-on-detail moves to the
    step-10 submenu.)*
-10. **Local app (yapplocal): fetch over the LAN contract.** `async_job` → `esp_http_client` GET
-    `/tasks` (base URL from app config, §9.4) → cJSON parse into `task_t[]` (free the tree immediately,
-    §6A.1) → render via `ui_list`. *Select* = complete (`POST …/complete`, optimistic); detail submenu
-    = Postpone / Sync now (`POST …/postpone`, hidden on 501). No URL configured → app stays hidden.
+10. **Local app (yapplocal): fetch over the LAN contract.** ✅ **Done.** `async_job` → `esp_http_client`
+    GET `<url>/tasks` (base URL from app config §9.4, ns `local`) → **cJSON** parse (`espressif/cjson`,
+    not bundled in IDF v6) into `task_t[]` → render via `ui_list`. *Select* = complete (`POST
+    …/complete`, **optimistic remove + re-sync**); encoder *click* = Sync now; no URL → "Set URL in
+    setup". `exit()` cancels an in-flight fetch (cooperative). **Verified on hardware:** device fetched
+    4 tasks from the LAN server, parsed + rendered; completing tasks POSTed + re-synced (server store
+    emptied). *(Deferred polish: a detail submenu with Postpone (`POST …/postpone`, hide on 501) +
+    View-description; and "hide app when no URL" — needs launcher hide support.)*
 11. **Yapp app (yappcloud): fetch Todoist directly (HTTPS).** `async_job` → `esp_http_client` + `esp-tls`
     + `esp_crt_bundle` → `GET https://api.todoist.com/rest/v2/tasks` with the Bearer token (app config,
     §9.4) → parse into the same `task_t[]` → render. Complete = `POST …/tasks/{id}/close`; postpone =
