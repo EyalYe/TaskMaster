@@ -721,8 +721,8 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
 | `ui` frame | `taskmaster_core/ui/` | OS-drawn LVGL frame: optional **right hint bar** (20px, 3 boxes) + content area; **no status bar** (§6) |
 | `task_model` (real) | `taskmaster_core/` | Fixed `task_t tasks[TASKMASTER_MAX_TASKS]` filled by parse (§6A.1), mutex-guarded |
 | `source_client` + `sync_task` | `taskmaster_core/net/` | `esp_http_client` GET/POST over the contract; the one always-on §5.2 writer |
-| `app_tasks` | `apps/app_tasks/` | Task Manager user app — registered **twice** (Yapp + Local) |
-| `yapp_server` + Local stub | `proxy/` (host) | Contract over Todoist via `~/yapp-cli`; canned-task stub for "Local" + tests |
+| Task Manager capability | `taskmaster_core` | Reusable source_client + render helpers; thin per-source app components live in `~/yappcloud` / `~/yapplocal` (§11.2) |
+| `yappcloud` / `yapplocal` | **own repos** (host + app) | Contract over Todoist via `~/yapp-cli`; canned-task LAN stub. Each = host server + device app (§11.2) |
 
 #### 8.5.2 Build order — Part A: LVGL UI foundation
 1. **LVGL bring-up.** ✅ **Done.** LVGL **9.4** (`lvgl/lvgl` managed dep) driven onto the panel
@@ -760,9 +760,14 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
    (no per-task malloc, §6A.1; ~5.7 KB) with mutex-guarded writer (`task_model_set_tasks/_sync`) and
    reader (`task_model_copy`, `task_model_get`) accessors (§5.2). The cJSON parser into this array is
    host-unit-testable and lands in step 7.
-6. **`yapp_server` + Local stub (host).** `GET /tasks` (flatten + priority-sort from Todoist via
-   `todolst.py`), `POST …/complete` (`todomark.py` `close_task`), `POST …/postpone` (or 501),
-   `GET /health`. Local stub returns canned tasks. Verify both with `curl`.
+6. **Host source servers (in their own repos).** ✅ **Done.** Each task source is a self-contained
+   **product in its own git repo** (apps live outside core — §11.2): **`~/yappcloud`** maps the contract
+   onto **Todoist** (reuses `~/yapp-cli`'s `get_api` + the `todolst.py` paginator/priority handling) and
+   **`~/yapplocal`** serves canned tasks from an in-memory store. Both are Python-stdlib `http.server`
+   (no deps for local; `todoist-api-python` for cloud) implementing `GET /tasks` (etag, priority-sorted,
+   title-truncated, `parent_id` nesting), `POST …/complete`, `POST …/postpone`, `GET /health`. Verified
+   with `curl` — local end-to-end, cloud against a real Todoist account (contract-valid). The device app
+   component for each source lands in the *same* repo at step 11.
 7. **`source_client` — fetch + parse.** GET `/tasks` into a bounded buffer; parse with **cJSON**
    straight into the fixed array under the mutex; free the cJSON tree immediately (§6A.1); honor
    `etag`. Drive against the LAN stub; log parsed tasks.
@@ -775,10 +780,14 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
 10. **Task Manager — actions.** *Select* = complete (`POST /complete`, optimistic remove, reflect next
     sync); *encoder click* = detail submenu (View description / Postpone / Sync now); *Postpone* =
     `POST /postpone` (hidden if 501). Re-publish hints per mode (§6).
-11. **Two source instances (Yapp + Local).** Register `app_tasks` **twice** — one component, two
-    `device_app_t` with distinct static state bound to a `task_source_t {name, url_key, token_key}`
-    (thin per-instance wrapper callbacks; `device_app_t` has no ctx). Each reads its URL+token from NVS
-    (§9.2). A source with **no URL stays hidden**. The active app selects the source `sync_task` polls.
+11. **Two source apps, one per repo (Yapp + Local).** Now that apps live in their own repos (§11.2),
+    the Task Manager is **not** one component registered twice. Instead **core provides the reusable
+    Task Manager capability** (the `source_client`, the §8.5.2 rendering helpers, the contract types) as
+    a stable API, and each source repo (**`~/yappcloud`**, **`~/yapplocal`**) ships a **thin app
+    component** that binds it to a `task_source_t {name, url_key, token_key}` and registers
+    (`TASKMASTER_REGISTER_APP`). Each reads its URL+token from NVS (§9.2); a source with **no URL stays
+    hidden**. The active app selects the source the `sync_task` polls. (This keeps the heavy logic in
+    one place — core — while sources version independently, §11.2.)
 12. **Offline + write semantics.** `WIFI_EN=0` / dropped link → **cached** tasks + `OFFLINE`, "Sync now"
     unavailable, writes **queued** to replay on reconnect (final call here). One path shared with a
     dropped connection (§8.3).
@@ -967,6 +976,20 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 > **Status (Phase 1 complete):** the refactor above is **done** — platform services and the app
 > framework live in `components/taskmaster_core/`, and `apps/app_hello/` is the first self-registering
 > app component, listed in `main/idf_component.yml`. `main/` is now a thin composition root.
+
+### 11.2 Apps live in their own repos (core ⟂ userspace)
+**Decided.** Anything app-specific lives **outside** the TaskMaster (core) repo, in its own git repo,
+so core and app development version independently and a core change can't silently break an app
+("don't break userspace"). The coupling is *only* the **stable app API** (`device_app_t` + the helper
+headers, §6) and the **device REST contract** (§8.1).
+- Each **source product** is one repo holding both halves: the **device app component** (pulled into a
+  build via a `git:` line in `main/idf_component.yml`, §6.1) **and** its **host server**. Today:
+  **`~/yappcloud`** (Todoist) and **`~/yapplocal`** (LAN stub). Their device app components are added at
+  §8.5 step 11.
+- The core repo keeps only **core apps** (Launcher, Setup/Wi-Fi → Settings) and **`apps/app_hello`** as
+  the canonical minimal example + framework smoke/leak-test target.
+- Core must therefore treat the app API as a **stable contract**: additive changes preferred; breaking
+  changes are versioned and called out.
 
 ### 11.1 Coding standards
 - **No magic numbers.** Every numeric literal — pixel coordinates/sizes, stack depths, timeouts,
