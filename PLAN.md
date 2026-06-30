@@ -856,11 +856,20 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
     4 tasks from the LAN server, parsed + rendered; completing tasks POSTed + re-synced (server store
     emptied). *(Deferred polish: a detail submenu with Postpone (`POST …/postpone`, hide on 501) +
     View-description; and "hide app when no URL" — needs launcher hide support.)*
-11. **Yapp app (yappcloud): fetch Todoist directly (HTTPS).** `async_job` → `esp_http_client` + `esp-tls`
-    + `esp_crt_bundle` → `GET https://api.todoist.com/rest/v2/tasks` with the Bearer token (app config,
-    §9.4) → parse into the same `task_t[]` → render. Complete = `POST …/tasks/{id}/close`; postpone =
-    `POST …/tasks/{id}` `due_string`. Open→fetch→parse→**close the TLS session** (don't hold it). No
-    token → app hidden.
+11. **Yapp app (yappcloud): fetch Todoist directly (HTTPS).** ✅ **Done.** `async_job` → `esp_http_client`
+    + `esp-tls` + `esp_crt_bundle` → `GET https://api.todoist.com/api/v1/tasks` with the Bearer token
+    (app config, §9.4) → parse into the same `task_t[]` → render. Complete = `POST …/tasks/{id}/close`
+    (verified on hw). Open→fetch→parse→**close the TLS session** (don't hold it). Token from form
+    provisioning (ns `yapp`, key `token`).
+    - **Endpoint migration:** Todoist **retired `/rest/v2/`** (HTTP 410 Gone). The current **unified API
+      v1** is `GET /api/v1/tasks`, which returns `{"results":[...], "next_cursor":…}` (not a bare array)
+      — the parser unwraps `results`; `next_cursor` pagination is ignored (first page, capped at
+      `TASK_MAX`). Field map: `content`→title, `checked`→done, plus `id`/`priority`/`parent_id`/`due.date`.
+    - **Verified on hardware:** 6 real tasks fetched + parsed + rendered; complete (`POST …/{id}/close`)
+      returns 2xx and the task drops; heap min ~46 KB during the TLS handshake (healthy margin — the
+      direct-Todoist path is feasible on the C3 as predicted, no proxy needed). cJSON used on a capped
+      buffer (small account); jsmn/SAX remains the documented upgrade path below if a large account
+      proves too heavy.
     - **Parsing heavy payloads — don't DOM the whole tree.** cJSON builds the full JSON tree (~3–5× the
       body); a large Todoist account could blow the ~190 KB heap (with TLS already taking ~40–50 KB).
       Strategy: **(1) bound the request** — use a Todoist **filter** (e.g. due-before/overdue, or a
