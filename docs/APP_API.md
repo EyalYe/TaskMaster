@@ -256,3 +256,54 @@ Notes:
 - The `ns`/`key` strings must not contain `.` (the form encodes fields as `cfg.<ns>.<key>`).
 - A field the user hasn't set reads as your default — handle "not configured yet" gracefully (e.g. a
   source app with no URL simply stays hidden in the Launcher).
+
+## 8. Background work — fetch off the UI task (`async_job.h`)
+
+Your `render()`/`on_event()` run on the **UI task**. A multi-second network fetch there would freeze
+the screen and input. You also **must not spawn your own task** (it would break Home teardown). So do
+background I/O through the core **`async_job`** service: your `work` runs on a core worker, your `done`
+runs back on the UI task with the result.
+
+```c
+#include "async_job.h"
+
+typedef struct {            // your job context — core COPIES this at submit
+    char  url[96];          //  inputs (filled before submit)
+    int   count;            //  outputs (filled by work, read by done)
+} fetch_ctx_t;
+
+static esp_http_client_handle_t s_client;   // so cancel can abort it
+
+static void abort_fetch(void *arg) { (void)arg; esp_http_client_close(s_client); }
+
+static bool fetch_work(async_job_t *job, void *ctx) {     // WORKER task
+    fetch_ctx_t *c = ctx;
+    async_job_on_cancel(job, abort_fetch, NULL);          // let cancel unblock us
+    // ... esp_http_client GET c->url, parse into c-> outputs ...
+    if (async_job_cancelled(job)) return false;
+    return true;
+}
+
+static void fetch_done(void *ctx, bool ok) {              // UI task
+    fetch_ctx_t *c = ctx;
+    if (ok) { /* copy c->outputs into your app model, re-render */ }
+}
+
+static void my_sync(void) {
+    fetch_ctx_t c = {0};
+    snprintf(c.url, sizeof c.url, "%s", my_url);
+    async_job_submit(fetch_work, fetch_done, &c, sizeof c);   // c may go out of scope — it's copied
+}
+```
+
+Rules that keep teardown safe (§6A):
+- **`work` must only touch `ctx`** (the core-owned copy) — never your app's live state. That's why
+  core copies `ctx`: even if the user hits Home mid-fetch and your app is torn down, the worker only
+  touches the copy. Put both inputs and outputs in the `ctx` struct; `done` copies outputs into your
+  model.
+- **Register an abort hook** (`async_job_on_cancel`) for any blocking call, and **call
+  `async_job_cancel(job)` in your `exit()`**. Cancel sets a flag *and* fires your abort hook (e.g.
+  `esp_http_client_close`) so the blocked `work` returns; a cancelled job's `done` is skipped. Never
+  rely on the job being killed — it unwinds cooperatively and frees its own resources.
+- One job at a time (single worker): `async_job_submit` returns `NULL` if one is already running —
+  skip this sync and try again later.

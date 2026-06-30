@@ -22,6 +22,7 @@ typedef enum {
      * UI task, and NEVER delivered to an app's on_event. Apps react by reading the
      * relevant status in render() (the UI re-renders them when these fire). */
     EV_SYS_NET_CHANGED = 0x40,   /* connectivity changed (net_status.h) */
+    EV_SYS_JOB_DONE    = 0x41,   /* an async_job finished (async_job.h) */
 } input_event_t;
 
 /* Start the input task. Returns a queue of input_event_t to read from. */

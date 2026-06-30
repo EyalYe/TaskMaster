@@ -801,10 +801,13 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
    (text + optional leading glyph + indent level), it handles the scroll window, selection highlight,
    and wrap. **Refactor the Launcher to use it** (it hand-rolls a list today), proving it's generic.
    Settings and the app task lists reuse it. No task concepts in it.
-8. **Core: generic `async_job` service (task-agnostic).** `async_job_submit(work_fn, ctx, done_fn)` →
-   runs `work_fn` on a **core-owned worker task**, delivers the result to `done_fn` **on the UI task**;
-   apps do background I/O *without* spawning their own tasks (§6A.2). Results land on the UI task, so an
-   app's `task_t` model is **UI-task-only → no mutex**.
+8. **Core: generic `async_job` service (task-agnostic).** ✅ **Done.** `async_job_submit(work, done,
+   ctx, ctx_size)` → runs `work` on a **core-owned worker task**, delivers to `done` **on the UI task**
+   (via `EV_SYS_JOB_DONE`); apps do background I/O *without* spawning their own tasks (§6A.2). Results
+   land on the UI task, so an app's `task_t` model is **UI-task-only → no mutex**. **Verified on
+   hardware:** a 1.5 s worker job ran off the UI task (UI stayed live) and delivered `out=42` on the UI
+   task. Single worker (one job at a time; submit returns NULL if busy). App-author docs in
+   `docs/APP_API.md` §8.
    - **Cancellation must be cooperative — never `vTaskDelete` a blocked worker.** A worker stuck in
      `esp_http_client_perform()` holds an open socket + a ~40 KB TLS session; hard-killing it **orphans
      that memory** (a silent leak that defeats §6A.4). `async_job_cancel()` instead (a) sets a

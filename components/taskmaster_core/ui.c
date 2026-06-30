@@ -10,6 +10,7 @@
 #include "leak_test.h"
 #include "lvgl_disp.h"
 #include "ui_frame.h"
+#include "async_job.h"
 
 #include "esp_log.h"
 
@@ -97,6 +98,14 @@ static void ui_task(void *arg)
             continue;
         }
 
+        /* An async_job finished: run its done() on the UI task, then re-render so
+         * the app reflects the result (async_job.h, §8.5 step 8). */
+        if (ev == EV_SYS_JOB_DONE) {
+            async_job_deliver();
+            render_current(mode);
+            continue;
+        }
+
         if (mode == MODE_LAUNCHER) {
             int pick = launcher_input(ev);
             if (pick >= 0) {
@@ -122,7 +131,9 @@ static void ui_task(void *arg)
 void ui_start(QueueHandle_t input_events, const device_app_t *initial_app)
 {
     s_initial_app = initial_app;
-    /* Connectivity changes are posted onto this same queue so the UI re-renders. */
+    /* Connectivity changes + async-job completions are posted onto this same queue
+     * so the UI re-renders / delivers results on its own task. */
     net_status_attach_ui(input_events);
+    async_job_init(input_events);
     xTaskCreate(ui_task, "ui", UI_TASK_STACK, (void *)input_events, UI_TASK_PRIO, NULL);
 }
