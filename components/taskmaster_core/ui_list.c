@@ -65,6 +65,12 @@ void ui_list_draw(const ui_list_t *l, int y0_row, ui_list_text_fn fn, void *ctx)
         char line[sizeof(UI_LIST_CURSOR) + UI_LIST_TEXT_MAX];
         snprintf(line, sizeof(line), "%s%s",
                  idx == l->sel ? UI_LIST_CURSOR : UI_LIST_NOCURSOR, item);
-        ui_text(0, (y0_row + r) * UI_ROW_H, line);
+        lv_obj_t *row = ui_text(0, (y0_row + r) * UI_ROW_H, line);
+        /* Pin to one row (full content width × one line height) so a long row
+         * can't run under the hint bar OR wrap into the next row. The selected
+         * row auto-scrolls; the others get an ellipsis. */
+        lv_obj_set_size(row, lv_obj_get_width(ui_frame_content()), UI_ROW_H);
+        lv_label_set_long_mode(row,
+            idx == l->sel ? LV_LABEL_LONG_SCROLL : LV_LABEL_LONG_DOT);
     }
 }

@@ -37,6 +37,7 @@ void launcher_render(void)
     ui_list_set_count(&s_list, (int)app_manager_count());
 
     lv_obj_clean(ui_frame_content());          /* blank slate, then rebuild */
+    ui_frame_set_hints(&LAUNCHER_HINTS);       /* size content + show the bar FIRST */
     ui_text_row(LAUNCHER_TITLE_ROW, "TaskMaster");
 
     if (app_manager_count() == 0) {
@@ -52,8 +53,6 @@ void launcher_render(void)
     char bar[LAUNCHER_LINE_MAX];
     snprintf(bar, sizeof(bar), "net: %s", net_state_str(ns.state));
     ui_text_row(LAUNCHER_NET_ROW, bar);
-
-    ui_frame_set_hints(&LAUNCHER_HINTS);       /* show + label the right bar (§6) */
 }
 
 void launcher_open(void)
