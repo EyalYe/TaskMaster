@@ -21,10 +21,21 @@ typedef struct {
     const char *select;   /* Select button  → bottom box              (NULL = hide)       */
 } control_hints_t;
 
-/* Geometry (for apps that constrain content to the left of the bar). */
-#define HINT_BAR_X      107   /* left edge of the bar column (x 107..127 = 21px) */
-#define HINT_BAR_W      21
-#define CONTENT_W       107   /* usable width when the bar is shown (0..106) */
+/* Geometry — shared by the LVGL OS frame (ui_frame.c). The column is HINT_BAR_W
+ * wide at the right edge; three boxes (Home / Encoder / Select) with 1px gaps. */
+#define HINT_BAR_X        107   /* left edge of the bar column */
+#define HINT_BAR_W        21    /* column width */
+#define CONTENT_W         107   /* usable content width when the bar is shown */
 
-/* Draw the hint bar into the sh1106 framebuffer (call before sh1106_flush). */
-void hint_bar_draw(const control_hints_t *h);
+#define HINT_BOX_GAP      1     /* gap above/below/between boxes */
+#define HINT_HOME_Y       1     /* Home box: top, height */
+#define HINT_HOME_H       16
+#define HINT_ENC_Y        18    /* Encoder box: top, height (split into two cells) */
+#define HINT_ENC_H        28
+#define HINT_ENC_SPLIT_DY 12    /* divider offset from the encoder box top */
+#define HINT_SEL_Y        47    /* Select box: top, height */
+#define HINT_SEL_H        16
+
+#define HINT_LBL_DX       1     /* per-label horizontal nudge (right) */
+#define HINT_ROT_DY       2     /* rotate label offset from cell top */
+#define HINT_CLICK_DY     2     /* click label offset from cell bottom (negated) */

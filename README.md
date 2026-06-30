@@ -68,6 +68,15 @@ apps/app_hello/                example removable user app (demo)
 User apps depend only on the public API + display and can live in their own repos. Adding/removing one
 needs **no core edits**. App-author guide: [`docs/APP_API.md`](docs/APP_API.md).
 
+## Coding conventions
+
+- **No magic numbers.** Every numeric literal (pixel geometry, sizes, stack depths, timeouts, counts,
+  buffer lengths) is a **named `#define`/enum in a header**, never an inline number in a `.c` file —
+  only self-evident sentinels (`0`, `1`, `-1`) are exempt. Intent stays self-documenting and values
+  are single-sourced/tunable in one place. See [`PLAN.md`](PLAN.md) §11.1.
+- **One source of truth** per concern: wiring in `board_pins.h`, config in `nvs_config`, UI geometry in
+  the UI headers — never duplicated.
+
 ## Wiring (XIAO ESP32-C3)
 
 Single source of truth: [`components/taskmaster_core/include/board_pins.h`](components/taskmaster_core/include/board_pins.h).

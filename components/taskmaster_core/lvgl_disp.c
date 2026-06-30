@@ -7,13 +7,14 @@
 #include "lvgl.h"
 #include "esp_timer.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 static const char *TAG = "lvgl";
 
-/* I1 draw buffer: 8-byte palette header + 1 bit/pixel for the whole panel. */
-static uint8_t s_buf[8 + (OLED_W * OLED_H) / 8];
+#define LV_I1_PALETTE_BYTES 8    /* LVGL prepends a 2-color palette to I1 buffers */
+#define BITS_PER_BYTE       8
+
+/* I1 draw buffer: palette header + 1 bit/pixel for the whole panel. */
+static uint8_t s_buf[LV_I1_PALETTE_BYTES + (OLED_W * OLED_H) / BITS_PER_BYTE];
 
 static uint32_t tick_cb(void)
 {
@@ -25,11 +26,12 @@ static uint32_t tick_cb(void)
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     (void)area;
-    const uint8_t *bm = px_map + 8;            /* skip palette */
-    const int stride = OLED_W / 8;             /* bytes per row (full-refresh buffer) */
+    const uint8_t *bm = px_map + LV_I1_PALETTE_BYTES;     /* skip palette */
+    const int stride = OLED_W / BITS_PER_BYTE;            /* bytes per row */
     for (int y = 0; y < OLED_H; y++) {
         for (int x = 0; x < OLED_W; x++) {
-            int on = (bm[y * stride + (x >> 3)] >> (7 - (x & 7))) & 1;
+            int byte = bm[y * stride + (x / BITS_PER_BYTE)];
+            int on   = (byte >> ((BITS_PER_BYTE - 1) - (x % BITS_PER_BYTE))) & 1;
             sh1106_pixel(x, y, on);
         }
     }
@@ -50,39 +52,7 @@ void lvgl_disp_init(void)
              lv_version_minor(), OLED_W, OLED_H);
 }
 
-void lvgl_disp_smoke(void)
+uint32_t lvgl_disp_tick(void)
 {
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
-
-    /* Solid white box — isolates the bit/byte layout from font anti-aliasing.
-     * Clean rectangle ⇒ layout is right; "dots" ⇒ the dithered AA font is the issue. */
-    lv_obj_t *box = lv_obj_create(scr);
-    lv_obj_remove_style_all(box);
-    lv_obj_set_size(box, 48, 22);
-    lv_obj_set_pos(box, 6, 6);
-    lv_obj_set_style_bg_color(box, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
-
-    /* Label below the box. */
-    lv_obj_t *lbl = lv_label_create(scr);
-    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
-    lv_label_set_text(lbl, "LVGL ok 123");      /* upper+lower+digits */
-    lv_obj_align(lbl, LV_ALIGN_BOTTOM_MID, 0, -2);
-}
-
-static void lvgl_task(void *arg)
-{
-    (void)arg;
-    for (;;) {
-        uint32_t next = lv_timer_handler();
-        if (next > 50) next = 50;
-        vTaskDelay(pdMS_TO_TICKS(next < 5 ? 5 : next));
-    }
-}
-
-void lvgl_disp_start(void)
-{
-    xTaskCreate(lvgl_task, "lvgl", 6144, NULL, 4, NULL);
+    return lv_timer_handler();
 }

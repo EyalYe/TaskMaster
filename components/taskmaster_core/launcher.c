@@ -1,27 +1,27 @@
 /*
- * launcher.c — raw-rendered app list (PLAN §6.1). See launcher.h.
+ * launcher.c — LVGL app list (PLAN §6.1). See launcher.h.
  *
- * Layout (8 text rows on the 128x64 panel):
- *   row 0      title
- *   rows 1..5  app list with a '>' cursor (scrolls when count > 5)
- *   row 6      status bar (Wi-Fi + sync, read from the shared model)
- *   row 7      contextual control hint (CrossPoint-style, §6)
+ * Rebuilds the content area each render: title, a scrolling app list with a '>'
+ * cursor, and an inline net/sync line. The right hint bar is OS-drawn (ui_frame).
  */
 #include "launcher.h"
 
 #include "app_manager.h"
 #include "task_model.h"
 #include "net_status.h"
-#include "sh1106.h"
-#include "hint_bar.h"
+#include "ui_frame.h"
 
 #include <stdio.h>
 
 /* Launcher control hints (right bar): rotate scrolls, click/Select opens. */
 static const control_hints_t LAUNCHER_HINTS = { .rotate = "<>", .click = "OPN", .select = "OPN" };
 
-#define LIST_FIRST_ROW 1
-#define LIST_ROWS      5   /* rows 1..5 show apps */
+#define LAUNCHER_TITLE_ROW 0
+#define LIST_FIRST_ROW     1
+#define LIST_ROWS          5   /* app list spans rows 1..5 */
+#define LAUNCHER_NET_ROW   (UI_ROWS - 1)   /* inline net/sync on the last row */
+#define LAUNCHER_EMPTY_ROW 2
+#define LAUNCHER_LINE_MAX  20  /* max chars per rendered line */
 
 static int s_sel;   /* selected app index           */
 static int s_top;   /* app index at the first list row (scroll window) */
@@ -40,11 +40,11 @@ void launcher_render(void)
 {
     int count = (int)app_manager_count();
 
-    sh1106_clear();
-    sh1106_text_line(0, "TASKMASTER");
+    lv_obj_clean(ui_frame_content());          /* blank slate, then rebuild */
+    ui_text_row(LAUNCHER_TITLE_ROW, "TaskMaster");
 
     if (count == 0) {
-        sh1106_text_line(2, "  (NO APPS)");
+        ui_text_row(LAUNCHER_EMPTY_ROW, " (no apps)");
     } else {
         for (int r = 0; r < LIST_ROWS; r++) {
             int idx = s_top + r;
@@ -52,11 +52,11 @@ void launcher_render(void)
                 break;
             }
             const device_app_t *a = app_manager_get((unsigned)idx);
-            char line[24];
+            char line[LAUNCHER_LINE_MAX];
             snprintf(line, sizeof(line), "%c %s",
                      idx == s_sel ? '>' : ' ',
                      (a && a->name) ? a->name : "?");
-            sh1106_text_line(LIST_FIRST_ROW + r, line);
+            ui_text_row(LIST_FIRST_ROW + r, line);
         }
     }
 
@@ -65,13 +65,11 @@ void launcher_render(void)
     net_status_get(&ns);
     task_status_t st;
     task_model_get(&st);
-    char bar[20];
-    snprintf(bar, sizeof(bar), "NET:%s SY:%s",
-             net_state_str(ns.state), sync_state_label(st.sync));
-    sh1106_text_line(7, bar);
+    char bar[LAUNCHER_LINE_MAX];
+    snprintf(bar, sizeof(bar), "%s %s", net_state_str(ns.state), sync_state_label(st.sync));
+    ui_text_row(LAUNCHER_NET_ROW, bar);
 
-    hint_bar_draw(&LAUNCHER_HINTS);   /* right column (§6) */
-    sh1106_flush();
+    ui_frame_set_hints(&LAUNCHER_HINTS);       /* show + label the right bar (§6) */
 }
 
 void launcher_open(void)

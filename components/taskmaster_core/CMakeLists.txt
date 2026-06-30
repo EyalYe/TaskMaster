@@ -9,7 +9,6 @@ idf_component_register(
         "wifi_mgr.c"
         "app_setup.c"
         "leak_test.c"
-        "hint_bar.c"
         "lvgl_disp.c"
         "lv_font_tm5x7.c"
         "ui_frame.c"

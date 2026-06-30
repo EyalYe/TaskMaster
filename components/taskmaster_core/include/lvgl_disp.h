@@ -9,6 +9,10 @@
  */
 #pragma once
 
+#include <stdint.h>
+
 void lvgl_disp_init(void);    /* lv_init + 1-bit display + tick (after sh1106_init) */
-void lvgl_disp_start(void);   /* start the lv_timer_handler task */
-void lvgl_disp_smoke(void);   /* step-1 smoke test: a centered label */
+
+/* Pump LVGL once; returns ms until the next due timer. Called from the UI task
+ * loop — LVGL is single-threaded, so only that task touches lv_* (no mutex). */
+uint32_t lvgl_disp_tick(void);

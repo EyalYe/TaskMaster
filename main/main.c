@@ -17,6 +17,7 @@
 #include "net_status.h"
 #include "nvs_config.h"
 #include "wifi_mgr.h"
+#include "lvgl_disp.h"
 #include "ui.h"
 
 static const char *TAG = "main";
@@ -38,6 +39,7 @@ void app_main(void)
     if (sh1106_init() != ESP_OK) {
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");
     }
+    lvgl_disp_init();   /* LVGL on the panel (via the sh1106 framebuffer); the UI task pumps it */
 
     /* Register core apps (non-removable). User apps self-registered via their
      * constructors before app_main; core apps are owned by the core. */

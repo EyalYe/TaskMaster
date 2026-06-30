@@ -11,11 +11,17 @@
 #include "softap_portal.h"
 #include "wifi_mgr.h"
 #include "net_status.h"
-#include "sh1106.h"
+#include "ui_frame.h"
 #include "esp_log.h"
 
 static const char *TAG = "app.setup";
 static bool s_portal_up;
+
+#define SETUP_TITLE_ROW   0
+#define SETUP_STEP1_ROW   2
+#define SETUP_SSID_ROW    3
+#define SETUP_STEP2_ROW   4
+#define SETUP_URL_ROW     5
 
 static void setup_init(void)
 {
@@ -33,14 +39,14 @@ static void setup_on_event(uint8_t ev)
 
 static void setup_render(void)
 {
-    sh1106_clear();
-    sh1106_text_line(0, "SETUP / WIFI");
-    sh1106_text_line(2, "1 JOIN WIFI:");
-    sh1106_text_line(3, "  " SOFTAP_SSID);
-    sh1106_text_line(4, "2 OPEN IN BROWSER:");
-    sh1106_text_line(5, "  " SOFTAP_IP);
-    sh1106_text_line(7, "PASTE CFG ON PHONE");
-    sh1106_flush();
+    /* Instructional, phone-driven: no hint bar → use the full 128px width (§6). */
+    lv_obj_clean(ui_frame_content());
+    ui_frame_set_hints(NULL);
+    ui_text_row(SETUP_TITLE_ROW, "Setup / WiFi");
+    ui_text_row(SETUP_STEP1_ROW, "1 join wifi:");
+    ui_text_row(SETUP_SSID_ROW,  " " SOFTAP_SSID);
+    ui_text_row(SETUP_STEP2_ROW, "2 open browser:");
+    ui_text_row(SETUP_URL_ROW,   " " SOFTAP_IP);
 }
 
 static void setup_exit(void)

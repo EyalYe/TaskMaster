@@ -8,6 +8,8 @@
 #include "launcher.h"
 #include "net_status.h"
 #include "leak_test.h"
+#include "lvgl_disp.h"
+#include "ui_frame.h"
 
 #include "esp_log.h"
 
@@ -42,6 +44,10 @@ static void ui_task(void *arg)
     QueueHandle_t q    = (QueueHandle_t)arg;
     ui_mode_t     mode = MODE_LAUNCHER;
 
+    /* The UI task is the single owner of LVGL: it builds the OS frame and is the
+     * only thread that pumps lv_timer_handler / touches lv_* (no mutex, §5.2). */
+    ui_frame_init();
+
 #if CONFIG_TM_LEAK_TEST
     leak_test_run();                 /* §6A.4 harness (debug builds only) */
 #endif
@@ -62,8 +68,14 @@ static void ui_task(void *arg)
 
     input_event_t ev;
     for (;;) {
-        if (xQueueReceive(q, &ev, portMAX_DELAY) != pdTRUE) {
-            continue;
+        /* Pump LVGL, then wait for an input event up to the next LVGL deadline so
+         * animations/redraws keep flowing even with no input. */
+        uint32_t next = lvgl_disp_tick();
+        if (next > UI_LVGL_MAX_IDLE_MS) next = UI_LVGL_MAX_IDLE_MS;
+        if (next < UI_LVGL_MIN_MS)      next = UI_LVGL_MIN_MS;
+
+        if (xQueueReceive(q, &ev, pdMS_TO_TICKS(next)) != pdTRUE) {
+            continue;                    /* timeout → loop and pump LVGL again */
         }
 
         /* Home is OS-reserved (§5.2): it never reaches an app — it's the escape
@@ -112,5 +124,5 @@ void ui_start(QueueHandle_t input_events, const device_app_t *initial_app)
     s_initial_app = initial_app;
     /* Connectivity changes are posted onto this same queue so the UI re-renders. */
     net_status_attach_ui(input_events);
-    xTaskCreate(ui_task, "ui", 4096, (void *)input_events, 5, NULL);
+    xTaskCreate(ui_task, "ui", UI_TASK_STACK, (void *)input_events, UI_TASK_PRIO, NULL);
 }

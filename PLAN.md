@@ -740,13 +740,18 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
    Home / encoder-split / Select, §6) plus a **content container** apps draw into (108×64 with the bar,
    128×64 without it, per the app's `hint_bar` mode). `ui_set_hints()` updates the bar; **no status
    bar** — apps surface connectivity via `net_status.h` if they want it.
-3. **Screen-owned lifecycle (§6A).** Each app gets its own LVGL screen; `init()` builds widgets parented
-   to it; `exit()` = delete that screen → frees the whole tree in one call (the §6A "owned-by-screen"
-   rule becomes real). `app_manager`/`ui` create+load the app screen on switch, delete on exit. **Re-run
-   the §6A.4 leak gate** now that apps hold real widgets.
-4. **Port existing screens.** Rebuild the **Launcher** as an LVGL list (selection highlight + wrap),
-   and port **Hello** + the **Setup/Wi-Fi** screen. Add a fuller font (lowercase!) + glyphs (priority
-   `P1–P4`, nesting `↳`, Wi-Fi/sync). Verify all of Phase 0–2 still works on hardware, now in LVGL.
+3. **Widget lifecycle (§6A).** ✅ **Done.** Each app builds its widgets into the OS frame's **content
+   container**; on app switch `app_manager_switch_to()` calls `ui_frame_reset_content()` →
+   `lv_obj_clean(content)`, freeing the whole subtree in one call. **Deviation from "screen per app":**
+   one persistent screen + content-clean gives the identical §6A guarantee (whole tree freed at once)
+   with far less complexity — the OS frame (hint bar) persists across switches. **Threading:** the UI
+   task is the *single* LVGL owner — it pumps `lv_timer_handler` in its own loop (timed input receive),
+   so no separate task and no mutex. (UI task stack raised to `UI_TASK_STACK`=8KB for LVGL rendering.)
+4. **Port existing screens.** ✅ **Done.** Launcher (LVGL list, cursor + wrap), Hello, and Setup ported
+   via a tiny `ui_text`/`ui_text_row` helper layer. **Two fonts:** `UNSCII_8` for content (has
+   lowercase) and the generated thin `lv_font_tm5x7` for the tight hint-bar boxes. Setup demonstrates
+   the **hint-bar-off / full-width** mode. Verified on hardware: all Phase 0–2 flows work in LVGL.
+   *(Priority/nesting glyphs land with the Task Manager in Part B.)*
 
 #### 8.5.3 Build order — Part B: sync + Task Manager (on LVGL)
 5. **Contract + model types.** Finalize `task_t` (`id`, `title[N]`, `priority` 1–4, `due`, `parent_id`,
@@ -959,6 +964,16 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 > **Status (Phase 1 complete):** the refactor above is **done** — platform services and the app
 > framework live in `components/taskmaster_core/`, and `apps/app_hello/` is the first self-registering
 > app component, listed in `main/idf_component.yml`. `main/` is now a thin composition root.
+
+### 11.1 Coding standards
+- **No magic numbers.** Every numeric literal — pixel coordinates/sizes, stack depths, timeouts,
+  counts, buffer lengths — is a **named `#define` or enum with a meaningful name, declared in the
+  relevant header** (e.g. geometry in `hint_bar.h`/`ui_frame.h`, task stacks in the owning header).
+  Inline numbers in `.c` files are not allowed; the only exceptions are self-evident sentinels/indices
+  (`0`, `1`, `-1`). This keeps intent self-documenting and makes layout/config single-sourced and
+  tunable in one place. Applies to new code **and** to any code being touched.
+- **One source of truth:** wiring lives only in `board_pins.h`; the config schema only in `nvs_config`;
+  UI geometry only in the UI headers — never duplicated.
 
 ---
 

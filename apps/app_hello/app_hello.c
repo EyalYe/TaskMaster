@@ -11,15 +11,20 @@
  */
 #include "app.h"
 #include "input.h"
-#include "sh1106.h"
+#include "ui_frame.h"
 #include "net_status.h"
 #include "app_store.h"
-#include "hint_bar.h"
 #include "esp_log.h"
 
 static const control_hints_t HELLO_HINTS = { .rotate = "+/-", .click = "RST", .select = "RST" };
 
 #include <stdio.h>
+
+#define HELLO_TITLE_ROW   0
+#define HELLO_PROMPT_ROW  2
+#define HELLO_COUNT_ROW   3
+#define HELLO_NET_ROW     5
+#define HELLO_LINE_MAX    24
 
 static const char *TAG = "app.hello";
 static int          s_counter;
@@ -49,22 +54,21 @@ static void hello_on_event(uint8_t ev)
 
 static void hello_render(void)
 {
-    char line[24];
-    sh1106_clear();
-    sh1106_text_line(0, "HELLO APP");
-    sh1106_text_line(2, "TURN THE KNOB:");
-    snprintf(line, sizeof(line), "  COUNT = %d", s_counter);
-    sh1106_text_line(3, line);
+    char line[HELLO_LINE_MAX];
+    lv_obj_clean(ui_frame_content());          /* blank slate, then rebuild */
+    ui_text_row(HELLO_TITLE_ROW, "Hello app");
+    ui_text_row(HELLO_PROMPT_ROW, "Turn the knob:");
+    snprintf(line, sizeof(line), " count = %d", s_counter);
+    ui_text_row(HELLO_COUNT_ROW, line);
 
     /* Reading connectivity is one call — the platform re-renders us on change,
      * so this line stays current with no Wi-Fi event handling here (net_status.h). */
     net_status_t ns;
     net_status_get(&ns);
-    snprintf(line, sizeof(line), "NET: %s", net_state_str(ns.state));
-    sh1106_text_line(5, line);
+    snprintf(line, sizeof(line), "net: %s", net_state_str(ns.state));
+    ui_text_row(HELLO_NET_ROW, line);
 
-    hint_bar_draw(&HELLO_HINTS);   /* right control bar (§6) */
-    sh1106_flush();
+    ui_frame_set_hints(&HELLO_HINTS);          /* show + label the right bar (§6) */
 }
 
 static void hello_exit(void)

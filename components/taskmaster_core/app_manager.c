@@ -1,4 +1,5 @@
 #include "app_manager.h"
+#include "ui_frame.h"
 
 #define MAX_APPS 16
 
@@ -31,6 +32,11 @@ const device_app_t *app_manager_switch_to(int index)
         s_active->exit();
     }
     s_active = NULL;
+
+    /* Free the outgoing app's widget tree + reset the frame to a blank slate, so
+     * the incoming init() builds onto a clean content area (the §6A "owned-by-
+     * screen" guarantee, via lv_obj_clean of the content container). */
+    ui_frame_reset_content();
 
     if (index >= 0 && (unsigned)index < s_count) {
         s_active = s_apps[index];
