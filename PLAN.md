@@ -340,8 +340,31 @@ void ui_set_hints(const control_hints_t *h);   /* call from the active app, UI t
   affordances). An app selects its mode in its `device_app_t` (e.g. a `hint_bar` flag); Home still
   works as the physical escape hatch regardless.
 
-There is **no status bar** — connectivity/sync is surfaced by apps that want it (via `net_status.h`),
-not an OS-reserved strip. Cost is tiny: the bar redraws only when hints change (on-demand, §4.2).
+There is **no status bar** *(in MVP)* — connectivity/sync is surfaced by apps that want it (via
+`net_status.h`), not an OS-reserved strip. Cost is tiny: the bar redraws only when hints change
+(on-demand, §4.2). *(A rich status bar returns post-MVP — see §6C.)*
+
+### 6C. Future UI upgrade — glyph hint bar + rich status bar (post-MVP, NOT Phase 3)
+Two related UI upgrades, **deferred** (assets staged in `icons/`: `home`, `scroll`, `reset`,
+`connected`, `not_connected`, …). Decisions beyond the sketch below are left for when we build it.
+
+1. **Hint-bar glyphs.** Replace the ≤3-char text labels (`HOM`/`<>`/`OPN`) with **1-bit glyphs** in the
+   20px boxes (the `icons/` assets). The `control_hints_t` contract is unchanged — only the rendering
+   swaps text → glyph; an app can still fall back to a short label. Cleaner at 20px.
+
+2. **Rich status bar — in the LAUNCHER only** (not an OS strip over every app, so app content areas are
+   unaffected). Shown on the Launcher screen **only when online** (and a city is set), carrying:
+   - a **connectivity glyph** (`connected` / `not_connected`),
+   - the **time** — `esp_sntp` synced from an NTP server at a sensible interval, and
+   - **weather** (an API call).
+   - **Offline / Wi-Fi off / no city → the Launcher shows no status bar** (its current plain list).
+   - **City** is entered at **provisioning** (likely an `ACFG_PASTE` field, §9.4, or a core field — TBD).
+     **Timezone is an API call** keyed by the city (so NTP time displays correctly); **weather** is a
+     second API call (same provider likely).
+
+   This stays clear of the apps entirely (it's Launcher chrome), and reconciles with §6's MVP "no status
+   bar" — apps never get one; the Launcher gains this only online + post-MVP. Open (decide later): which
+   weather/timezone API; sync intervals; where the city/time/weather service lives; glyph asset format.
 
 ### Apps — core (built-in, non-removable) vs. user (manifest-driven, removable)
 
