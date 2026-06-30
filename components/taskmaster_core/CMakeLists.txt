@@ -8,6 +8,7 @@ idf_component_register(
         "app_store.c"
         "wifi_mgr.c"
         "app_setup.c"
+        "leak_test.c"
         "launcher.c"
         "ui.c"
         "sh1106.c"

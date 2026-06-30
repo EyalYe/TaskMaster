@@ -1,0 +1,18 @@
+menu "TaskMaster"
+
+config TM_LEAK_TEST
+    bool "Run the §6A.4 leak-test harness at boot"
+    default n
+    help
+        When enabled, the UI task runs launch→Home→relaunch cycles on every
+        registered app at boot and logs the free-heap delta per app, asserting the
+        heap returns to its pre-launch baseline (PLAN §6A.4). Pair with
+        CONFIG_HEAP_POISONING_COMPREHENSIVE (see sdkconfig.ci) to also catch
+        overflow / use-after-free. Off in normal builds.
+
+config TM_LEAK_TEST_ITERS
+    int "Leak-test cycles per app"
+    depends on TM_LEAK_TEST
+    default 20
+
+endmenu

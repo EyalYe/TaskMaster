@@ -1,0 +1,8 @@
+# Debug overlay for the §6A.4 leak harness (PLAN §7A.7). Build with:
+#   idf.py -B build_leak -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" \
+#          -D SDKCONFIG=sdkconfig.leak build flash monitor
+# Runs the leak test at boot and turns on comprehensive heap poisoning so overflow
+# / use-after-free / double-free are caught during the launch→Home→relaunch cycles.
+
+CONFIG_TM_LEAK_TEST=y
+CONFIG_HEAP_POISONING_COMPREHENSIVE=y

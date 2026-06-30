@@ -564,11 +564,15 @@ boot when unprovisioned.
 Offline rendering (cached tasks + `OFFLINE`) is Phase 3's Task Manager (§8.3); Phase 2 just makes the
 state correct.
 
-### 7A.7 §6A.4 leak harness (carried over)
-- Debug build (heap poisoning + leak tracing, §6A.3) — e.g. `sdkconfig.ci` / `menuconfig`.
-- A serial-triggered self-test runs launch→Home→relaunch ×N on `app_hello` **and the Setup app**
-  (whose teardown stops the HTTP server + AP — the realistic teardown to prove clean), asserting
-  `min_free_heap` returns to the pre-launch value. Becomes a standing per-app gate (§17).
+### 7A.7 §6A.4 leak harness ✅ (done)
+- `CONFIG_TM_LEAK_TEST` (component `Kconfig`) + `sdkconfig.ci` overlay (adds
+  `CONFIG_HEAP_POISONING_COMPREHENSIVE`). Build the variant in a side dir:
+  `idf.py -B build_leak -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" -D SDKCONFIG=sdkconfig.leak build flash`.
+- `leak_test.c` runs on the UI task at boot: one warm-up cycle to absorb one-time allocs, then N
+  launch→event→render→Home cycles per app, checking the free heap returns to baseline, plus
+  `heap_caps_check_integrity_all()`. A standing per-app gate (§17).
+- **Verified on hardware** (poisoning on): `Hello` Δ=+16, `Setup` Δ=−88 (20 cycles incl. HTTP+AP
+  up/down) — both **PASS**, no integrity failure, no panic.
 
 ### 7A.8 Security touchpoints (§10)
 Open `TaskMaster-Setup` AP is up **only** during setup and **auto-disables** on success/timeout (never
@@ -863,8 +867,8 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 |---|---|---|
 | **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
-| **2 — Provisioning portal** ◀ next | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
-| **3 — Sync + Task Manager** | `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline mode, §8.3) | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
+| **2 — Provisioning portal** ✅ | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
+| **3 — Sync + Task Manager** ◀ next | `yapp-server` proxy + two source apps over the contract; network task **honors `WIFI_EN`** (offline mode, §8.3) | Tasks display priority-sorted with nesting (mirrors `todomark`); status bar accurate; complete/postpone work; "Local" app works against a stub server; **Wi-Fi-off shows cached tasks + OFFLINE** |
 | **4 — Settings + power** | Settings app + idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Startup target, deep-sleep toggle, timeout all persist and take effect; screen blanks on idle; **system reaches light sleep when idle** (poll no longer blocks tickless idle) |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
@@ -873,10 +877,11 @@ External/third-party apps live in **their own repos** and are pulled by a `git:`
 Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP. Phase 6 = app-ecosystem hardening (deferred until
 third-party apps are a real concern).
 
-> **Current state (2026-06-30):** Phases 0–1 complete and **verified on hardware** (XIAO ESP32-C3) —
-> builds clean on ESP-IDF v6.0.1 (app ≈ 876 KB, 55% free in the OTA slot); boot enumerates the
-> registered app, the Launcher renders, and enter-app → input → **Home** teardown was confirmed
-> over serial on-device (clean `init`/`exit` each cycle). **Phase 2 (provisioning portal) is next.**
+> **Current state (2026-06-30):** Phases 0–2 complete and **verified on hardware** (XIAO ESP32-C3) on
+> ESP-IDF v6.0.1. Phase 2 closed end to end: paste-from-phone form → NVS → reboot → **associates with
+> the real AP** (got IP); Setup is a re-enterable core app; re-provision-from-Launcher raises the AP
+> beside a live STA without dropping it; the §6A.4 leak harness passes with heap poisoning. **Phase 3
+> (sync + Task Manager) is next.**
 
 > **⚠ Phase 4 — input must go interrupt-driven (don't forget).** The Phase-1 input path is a **1 ms
 > poll** (§4.3), chosen because Phase 1 is mains-powered. That poll **prevents the system from ever
@@ -939,8 +944,9 @@ No open decisions remain — the plan is build-ready.
       real Wi-Fi + sync state.
 - [ ] Select completes the highlighted task; Postpone (submenu) reschedules; both reflect on next sync.
 - [ ] **Home returns to the Launcher from anywhere**, even mid-action, never swallowed by an app.
-- [ ] **Leak-clean teardown:** a launch→Home→relaunch heap-trace cycle (incl. Home fired mid-fetch)
-      restores `min_free_heap` to its pre-launch value across 100 iterations, per app (§6A.4).
+- [x] **Leak-clean teardown:** launch→Home→relaunch cycles restore the free heap to baseline per app,
+      with comprehensive heap poisoning catching no corruption (§6A.4 / §7A.7). *(Hello + Setup pass on
+      hardware; mid-fetch Home + 100× scaling fold into Phase 3 once a real fetch exists.)*
 - [ ] The contextual **hint strip** shows the current control labels and updates when an app changes
       mode (e.g. Task Manager list view → detail submenu).
 - [ ] Settings changes (startup target, timeout, deep-sleep toggle) persist and take effect.

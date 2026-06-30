@@ -7,6 +7,7 @@
 #include "app_manager.h"
 #include "launcher.h"
 #include "net_status.h"
+#include "leak_test.h"
 
 #include "esp_log.h"
 
@@ -40,6 +41,10 @@ static void ui_task(void *arg)
 {
     QueueHandle_t q    = (QueueHandle_t)arg;
     ui_mode_t     mode = MODE_LAUNCHER;
+
+#if CONFIG_TM_LEAK_TEST
+    leak_test_run();                 /* §6A.4 harness (debug builds only) */
+#endif
 
     /* Boot straight into the initial app (e.g. Setup in provisioning mode), else
      * the Launcher. Falls back to the Launcher if the app isn't registered. */

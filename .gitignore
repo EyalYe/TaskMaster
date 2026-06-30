@@ -1,5 +1,8 @@
 # ESP-IDF build output
 /build/
+# Leak-test variant build (sdkconfig.ci overlay) — see PLAN §7A.7
+/build_leak/
+/sdkconfig.leak
 
 # Timestamped backups of successful builds (tools/backup_build.sh)
 /build_backups/
