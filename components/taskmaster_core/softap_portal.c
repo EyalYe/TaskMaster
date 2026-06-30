@@ -214,7 +214,12 @@ static esp_err_t save_post(httpd_req_t *req)
         url_decode(val);
 
         if (strncmp(key, APP_CFG_FORM_PREFIX, prefix_len) == 0) {
-            /* App field "cfg.<ns>.<key>" → app_store(ns).set(key, val). */
+            /* App field "cfg.<ns>.<key>" → app_store(ns).set(key, val). Skip an
+             * empty value so re-provisioning is additive (a blank field keeps the
+             * previously-stored value instead of clearing it). */
+            if (val[0] == '\0') {
+                continue;
+            }
             char *ns = key + prefix_len;
             char *dot = strchr(ns, '.');
             if (!dot) continue;
