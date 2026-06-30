@@ -754,9 +754,12 @@ nested tasks → complete/postpone → reflects on next sync; Wi-Fi off → cach
    *(Priority/nesting glyphs land with the Task Manager in Part B.)*
 
 #### 8.5.3 Build order — Part B: sync + Task Manager (on LVGL)
-5. **Contract + model types.** Finalize `task_t` (`id`, `title[N]`, `priority` 1–4, `due`, `parent_id`,
-   `done`), `TASKMASTER_MAX_TASKS`, JSON shape + `etag` (§8.1); extend `task_model.h` with the array +
-   copy-out accessors. Pure parse is **host-unit-testable**.
+5. **Contract + model types.** ✅ **Done.** `task_t` (`id`, `parent_id`, `title`, `due`, `priority`,
+   `done`) with named size bounds (`TASKMASTER_MAX_TASKS`=50, `TASK_TITLE_MAX`, …) and the JSON
+   shape/`etag` documented in `task_model.h` (§8.1). The model now holds a **fixed `task_t` array**
+   (no per-task malloc, §6A.1; ~5.7 KB) with mutex-guarded writer (`task_model_set_tasks/_sync`) and
+   reader (`task_model_copy`, `task_model_get`) accessors (§5.2). The cJSON parser into this array is
+   host-unit-testable and lands in step 7.
 6. **`yapp_server` + Local stub (host).** `GET /tasks` (flatten + priority-sort from Todoist via
    `todolst.py`), `POST …/complete` (`todomark.py` `close_task`), `POST …/postpone` (or 501),
    `GET /health`. Local stub returns canned tasks. Verify both with `curl`.
