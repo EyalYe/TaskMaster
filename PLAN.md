@@ -92,7 +92,9 @@ Three buttons, two roles:
 | Buttons | 2× tactile momentary | **Select** (app-usable) + **Home** (OS-reserved); internal pull-ups; sample-debounced GPIO read (§4.3) |
 | Enclosure | 3D-printed, 15–20° wedge | Exposes screen, knob, 2 buttons only |
 
-**Pin budget:** OLED (SDA/SCL = 2), encoder (A/B/SW = 3), buttons (2) = **7 GPIO** + power. XIAO
+**Pin budget:** OLED (SDA/SCL = 2), encoder (A/B/SW = 3), buttons (2) = **7 GPIO** + power. *(Battery
+build: add an **RC filter** on encoder A/B + buttons so the Phase-4 interrupt-driven input is bounce-free
+in hardware and tickless idle can engage — §14.)* XIAO
 ESP32-C3 exposes 11 GPIO — comfortable headroom.
 
 **⚠ SRAM is the real constraint, not GPIO.** 400KB SRAM holds the Wi-Fi stack, optionally an
@@ -137,8 +139,11 @@ specially — see §4.6/§5.2.)
 ### 4.4 UI library: LVGL (decided)
 **LVGL** via the official `esp_lvgl_port` component, on the SH1106 panel through `esp_lcd`. Cost is
 real on 400KB SRAM + Wi-Fi, so budget for it:
-- **1-bit (`I1`) color depth** matched to the mono panel; one **partial** draw buffer (a fraction of
-  the 1KB frame), not a full double buffer.
+- **1-bit (`I1`) color depth** matched to the mono panel; **one full-frame buffer (~1 KB)** in
+  `RENDER_MODE_FULL`, *not* a partial fraction. A full mono frame is exactly 128×64/8 = **1024 bytes**;
+  shaving it saves nothing meaningful on 400 KB but multiplies flush calls per frame. One buffer = one
+  flush/frame, freeing CPU for the real SRAM consumers (TLS + JSON). *(This is what `lvgl_disp.c`
+  ships.)*
 - Pump `lv_timer_handler` on input/data-change events + while animating only (§4.2).
 - Trim hard via Kconfig: disable unused widgets, fonts, the LVGL FS; compile only what the Launcher +
   Task Manager use. Watch the OTA-partition budget (§9).
@@ -798,9 +803,18 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
    Settings and the app task lists reuse it. No task concepts in it.
 8. **Core: generic `async_job` service (task-agnostic).** `async_job_submit(work_fn, ctx, done_fn)` →
    runs `work_fn` on a **core-owned worker task**, delivers the result to `done_fn` **on the UI task**;
-   `async_job_cancel()` on app `exit()` so a fetch in flight can't write into freed app memory (§6A —
-   this is how apps do background I/O *without* spawning their own tasks, §6A.2). Apps stay
-   single-threaded, so an app's `task_t` model is **UI-task-only → no mutex**.
+   apps do background I/O *without* spawning their own tasks (§6A.2). Results land on the UI task, so an
+   app's `task_t` model is **UI-task-only → no mutex**.
+   - **Cancellation must be cooperative — never `vTaskDelete` a blocked worker.** A worker stuck in
+     `esp_http_client_perform()` holds an open socket + a ~40 KB TLS session; hard-killing it **orphans
+     that memory** (a silent leak that defeats §6A.4). `async_job_cancel()` instead (a) sets a
+     **cancel flag** the worker polls, and (b) **aborts the blocked I/O** — e.g. `esp_http_client_close()`
+     on the in-flight client handle — so `perform()` returns, the worker frees *its own* resources and
+     exits. The job exposes a cancel hook (the work registers its client handle) so core can abort it.
+   - **`exit()` runs on the UI task and must stay fast**, so it *requests* cancel + abort and returns;
+     it does **not** join a worker that could be on a multi-second TLS timeout. The app's result buffer
+     is only written by `done_fn` (UI task), so once cancelled, no late write can touch freed app state.
+     A `done_fn` that arrives after the app has exited is dropped (core checks the job is still live).
 9. **App-side task model + render (thin, per app).** Each source app defines its `task_t[]` (bounded,
    §6A.1) and a `render` that formats tasks into `ui_list` rows: priority glyph (`P1..P4`), `parent_id`
    nesting (indent), due on the selected line, empty state "No open tasks 🎉". Shared by convention
@@ -811,9 +825,19 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
     = Postpone / Sync now (`POST …/postpone`, hidden on 501). No URL configured → app stays hidden.
 11. **Yapp app (yappcloud): fetch Todoist directly (HTTPS).** `async_job` → `esp_http_client` + `esp-tls`
     + `esp_crt_bundle` → `GET https://api.todoist.com/rest/v2/tasks` with the Bearer token (app config,
-    §9.4) → parse Todoist JSON into the same `task_t[]` → render. Complete = `POST …/tasks/{id}/close`;
-    postpone = `POST …/tasks/{id}` `due_string`. Open→fetch→parse→**close the TLS session** (don't hold
-    it). No token → app hidden.
+    §9.4) → parse into the same `task_t[]` → render. Complete = `POST …/tasks/{id}/close`; postpone =
+    `POST …/tasks/{id}` `due_string`. Open→fetch→parse→**close the TLS session** (don't hold it). No
+    token → app hidden.
+    - **Parsing heavy payloads — don't DOM the whole tree.** cJSON builds the full JSON tree (~3–5× the
+      body); a large Todoist account could blow the ~190 KB heap (with TLS already taking ~40–50 KB).
+      Strategy: **(1) bound the request** — use a Todoist **filter** (e.g. due-before/overdue, or a
+      project) so the server returns fewer tasks; **(2) hard-cap the read buffer** and bail with a clear
+      "too many tasks — narrow the filter" if exceeded; **(3) parse light** — read the body in
+      `esp_http_client` chunks and use **jsmn or a hand-rolled field scanner** for just the 6 fields we
+      need (`id`, `content`, `priority`, `due.date`, `parent_id`, `is_completed`), not cJSON. (jsmn still
+      buffers the body but drops cJSON's node overhead; a true chunked SAX pass keeps memory flat — pick
+      per measured headroom at build time.) **Fallback:** the `~/yapplocal`-style proxy stays a
+      documented escape hatch if a real account proves too heavy to parse on-device.
 12. **Offline + write semantics.** `WIFI_EN=0` / dropped link → render **cached** `task_t[]` + an
     `OFFLINE` marker, "Sync now" unavailable, writes **queued** (bounded) to replay on reconnect — one
     path for both off-by-toggle and dropped (§8.3). Each app owns its cache (userspace).
@@ -887,8 +911,10 @@ phy_init   4KB
 ota_0      ~1.9MB  — app slot A
 ota_1      ~1.9MB  — app slot B
 ```
-- **Slot budget watch (⚠):** the full app (LVGL + Wi-Fi + HTTP + app code) must fit one ~1.9MB slot.
-  Keep the LVGL Kconfig trim (§4.4) honest; track image size in CI so overflow is caught early.
+- **Slot budget watch (⚠):** the full app (LVGL + Wi-Fi + HTTP + app code) must fit one ~1.9MB slot;
+  it's already ~1.1MB. Keep the LVGL Kconfig trim (§4.4) honest; track image size in CI. **Phase-5 BLE
+  is the real squeeze:** the Bluedroid stack is ~500KB+ — use **NimBLE** (much lighter) and trim BLE
+  Kconfig (no classic BT, minimal GATT) so the BLE-provisioning build still fits.
 - **Update delivery:** the network task pulls a signed image from a configurable **`FW_URL`** (served
   by the LAN box or `yapp-server`) via `esp_https_ota`; the bootloader boots the new slot and
   **rolls back** if the app fails to self-confirm (`esp_ota_mark_app_valid_cancel_rollback`).
@@ -1131,6 +1157,12 @@ third-party apps are a real concern).
 > changes, so no decode logic is lost. Design this **together with the §8A sleep-state machine** (which
 > states exist, what wakes from each), not in isolation. Optionally reevaluate the managed `button`
 > component here for its built-in wake-source + long-press support.
+>
+> **⚠ Add hardware debounce (PCB) for the interrupt switch.** The 1 ms poll currently *masks* contact
+> bounce; raw GPIO interrupts on a bouncy EC11 / tactile switch fire **bursts** of edges. Rather than
+> reintroduce that complexity as ISR-side software debounce, add a simple **RC filter** (e.g. ~10 kΩ +
+> ~100 nF, tuned) on encoder A/B + the buttons so edges are clean in hardware. Then raw interrupts are
+> reliable *and* tickless idle unlocks — the cleanest path. Bake this into the battery-build PCB (§3 BOM).
 
 ---
 
@@ -1138,12 +1170,14 @@ third-party apps are a real concern).
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| SRAM exhaustion (Wi-Fi + JSON + LVGL) | Med | High | Proxy shrinks/flattens JSON; LVGL 1-bit + single partial buffer + Kconfig-trimmed widgets/fonts; bounded buffers; cap task count; XIAO-S3 escape hatch |
+| SRAM exhaustion (Wi-Fi + TLS + JSON + LVGL) | Med | High | TLS is the big consumer (~40–50KB during a fetch); LVGL 1-bit full-frame buffer (~1KB) + Kconfig-trim; **stream/bound the Todoist parse** (§8.5 step 11); cap task count; tear down TLS after each fetch; XIAO-S3 escape hatch |
 | Direct Todoist TLS too heavy on-device | Med | Med | `yapp-server` proxy is the default; direct is stretch only |
 | Wrong SH1106 column offset → blank/garbled screen | Med | Low | Phase-0 driver bring-up; set the 2-px offset |
 | Task races on active-app / shared model | Med | High | Strict ownership (§5.2); single mutex; app switch on the UI task only |
-| App image overflows ~1.9MB OTA slot | Low | Med | Kconfig-trim LVGL; track image size in CI; drop unused features |
-| Encoder missed steps at speed | Low | Low | Hand-rolled Ben-Buxton state machine (C3 has no PCNT, §4.3); 1 ms poll; tune steps-per-detent |
+| App image overflows ~1.9MB OTA slot | Med | Med | App already ~1.1MB w/ LVGL. **Phase-5 BLE is the threat** — Bluedroid is ~500KB+; use **NimBLE** + Kconfig-trim, track image size in CI, drop unused features |
+| Direct-Todoist payload blows the heap | Med | High | DOM (cJSON) peaks ~3–5× body; **bound via Todoist filter + hard-capped read buffer + jsmn/SAX field scanner** (§8.5 step 11); proxy fallback documented |
+| Killing a blocked worker leaks the TLS session | Med | High | `async_job_cancel()` is **cooperative** — flag + `esp_http_client_close()` to abort the socket; worker frees its own ~40KB session; never `vTaskDelete` mid-`perform()` (§8.5 step 8) |
+| Encoder missed steps at speed | Low | Low | Hand-rolled Ben-Buxton state machine (C3 has no PCNT, §4.3); 1 ms poll; tune steps-per-detent; HW RC filter at the battery build (§14) |
 | ESP32-only lock-in (left Zephyr's portability) | Low | Low | Accepted — committed to Espressif silicon; `device_app_t` + the REST contract stay portable concepts |
 
 *(Note: SoftAP/HTTP/captive-portal — formerly the top risk on Zephyr — is now a supported ESP-IDF
