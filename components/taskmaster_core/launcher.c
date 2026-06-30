@@ -78,16 +78,21 @@ void launcher_open(void)
 
 int launcher_input(input_event_t ev)
 {
+    int count = (int)app_manager_count();
     switch (ev) {
     case EV_ENCODER_CW:
-        s_sel++;
-        clamp_window();
-        launcher_render();
+        if (count > 0) {
+            s_sel = (s_sel + 1) % count;            /* wrap past the end → top */
+            clamp_window();
+            launcher_render();
+        }
         break;
     case EV_ENCODER_CCW:
-        s_sel--;
-        clamp_window();
-        launcher_render();
+        if (count > 0) {
+            s_sel = (s_sel - 1 + count) % count;    /* wrap past the top → end */
+            clamp_window();
+            launcher_render();
+        }
         break;
     case EV_ENCODER_CLICK:
     case EV_SELECT:
