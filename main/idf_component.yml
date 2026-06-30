@@ -18,6 +18,6 @@ dependencies:
   tm_local:
     git: git@github.com:EyalYe/TM-YappLocal.git
     path: app
-  # tm_yapp:
-  #   git: git@github.com:EyalYe/TM-YappCloud.git
-  #   path: app
+  tm_yapp:
+    git: git@github.com:EyalYe/TM-YappCloud.git
+    path: app

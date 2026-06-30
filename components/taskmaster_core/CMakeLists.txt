@@ -13,6 +13,7 @@ idf_component_register(
         "lv_font_tm5x7.c"
         "lv_font_tm_sans.c"
         "ui_frame.c"
+        "ui_list.c"
         "launcher.c"
         "ui.c"
         "sh1106.c"

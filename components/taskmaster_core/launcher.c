@@ -1,14 +1,15 @@
 /*
- * launcher.c — LVGL app list (PLAN §6.1). See launcher.h.
+ * launcher.c — the app list, built on the generic ui_list widget (PLAN §6.1, §8.5).
  *
- * Rebuilds the content area each render: title, a scrolling app list with a '>'
- * cursor, and an inline net/sync line. The right hint bar is OS-drawn (ui_frame).
+ * Proves ui_list is task-agnostic: the Launcher is just a title + a ui_list of app
+ * names + an inline connectivity line. The right hint bar is OS-drawn (ui_frame).
  */
 #include "launcher.h"
 
 #include "app_manager.h"
 #include "net_status.h"
 #include "ui_frame.h"
+#include "ui_list.h"
 
 #include <stdio.h>
 
@@ -17,46 +18,31 @@ static const control_hints_t LAUNCHER_HINTS = { .rotate = "<>", .click = "OPN", 
 
 #define LAUNCHER_TITLE_ROW 0
 #define LIST_FIRST_ROW     1
-#define LAUNCHER_NET_ROW   (UI_ROWS - 1)             /* inline net/sync on the last row */
+#define LAUNCHER_NET_ROW   (UI_ROWS - 1)             /* inline net on the last row */
 #define LIST_ROWS          (UI_ROWS - 2)             /* rows between title and net */
-#define LAUNCHER_EMPTY_ROW 2
 #define LAUNCHER_LINE_MAX  20  /* max chars per rendered line */
 
-static int s_sel;   /* selected app index           */
-static int s_top;   /* app index at the first list row (scroll window) */
+static ui_list_t s_list;
 
-static void clamp_window(void)
+/* ui_list row text: the app name at `index`. */
+static void launcher_row_text(int index, char *buf, int buf_sz, void *ctx)
 {
-    int count = (int)app_manager_count();
-    if (s_sel < 0)      s_sel = 0;
-    if (s_sel >= count) s_sel = count > 0 ? count - 1 : 0;
-    if (s_sel < s_top)              s_top = s_sel;
-    if (s_sel >= s_top + LIST_ROWS) s_top = s_sel - LIST_ROWS + 1;
-    if (s_top < 0)      s_top = 0;
+    (void)ctx;
+    const device_app_t *a = app_manager_get((unsigned)index);
+    snprintf(buf, buf_sz, "%s", (a && a->name) ? a->name : "?");
 }
 
 void launcher_render(void)
 {
-    int count = (int)app_manager_count();
+    ui_list_set_count(&s_list, (int)app_manager_count());
 
     lv_obj_clean(ui_frame_content());          /* blank slate, then rebuild */
     ui_text_row(LAUNCHER_TITLE_ROW, "TaskMaster");
 
-    if (count == 0) {
-        ui_text_row(LAUNCHER_EMPTY_ROW, " (no apps)");
+    if (app_manager_count() == 0) {
+        ui_text_row(LIST_FIRST_ROW, " (no apps)");
     } else {
-        for (int r = 0; r < LIST_ROWS; r++) {
-            int idx = s_top + r;
-            if (idx >= count) {
-                break;
-            }
-            const device_app_t *a = app_manager_get((unsigned)idx);
-            char line[LAUNCHER_LINE_MAX];
-            snprintf(line, sizeof(line), "%c %s",
-                     idx == s_sel ? '>' : ' ',
-                     (a && a->name) ? a->name : "?");
-            ui_text_row(LIST_FIRST_ROW + r, line);
-        }
+        ui_list_draw(&s_list, LIST_FIRST_ROW, launcher_row_text, NULL);
     }
 
     /* Inline connectivity indicator (no OS status bar, §6). No task/sync state —
@@ -72,33 +58,26 @@ void launcher_render(void)
 
 void launcher_open(void)
 {
-    s_sel = 0;
-    s_top = 0;
+    ui_list_init(&s_list, LIST_ROWS);
+    ui_list_set_count(&s_list, (int)app_manager_count());
     launcher_render();
 }
 
 int launcher_input(input_event_t ev)
 {
-    int count = (int)app_manager_count();
     switch (ev) {
     case EV_ENCODER_CW:
-        if (count > 0) {
-            s_sel = (s_sel + 1) % count;            /* wrap past the end → top */
-            clamp_window();
-            launcher_render();
-        }
+        ui_list_move(&s_list, +1);
+        launcher_render();
         break;
     case EV_ENCODER_CCW:
-        if (count > 0) {
-            s_sel = (s_sel - 1 + count) % count;    /* wrap past the top → end */
-            clamp_window();
-            launcher_render();
-        }
+        ui_list_move(&s_list, -1);
+        launcher_render();
         break;
     case EV_ENCODER_CLICK:
     case EV_SELECT:
         if (app_manager_count() > 0) {
-            return s_sel;
+            return ui_list_sel(&s_list);
         }
         break;
     default:
