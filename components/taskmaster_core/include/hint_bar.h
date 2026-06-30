@@ -1,10 +1,11 @@
 /*
  * hint_bar.h — the contextual control hint bar (PLAN §6).
  *
- * A vertical 20px column down the right edge with three 20×20 boxes (1×20px gaps):
- *   top    = Home   (OS-fixed)
- *   middle = Encoder — split into rotate (top cell) + push/click (bottom cell)
- *   bottom = Select
+ * A vertical 20px-wide column down the right edge with three boxes (1×20px gaps):
+ *   top    = Home    (OS-fixed)            — 18px tall
+ *   middle = Encoder — rotate (top cell)   — 24px tall (wider so its two cells
+ *            + push/click (bottom cell)      aren't cramped)
+ *   bottom = Select                        — 18px tall
  * Apps declare only the three app-usable controls; Home is OS-fixed. An app "uses"
  * the hint bar by drawing it (NULL fields hide a cell). Content area is the left
  * 108×64 when the bar is shown.

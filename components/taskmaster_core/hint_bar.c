@@ -1,8 +1,9 @@
 /*
  * hint_bar.c — interim raw-sh1106 hint bar (PLAN §6). See hint_bar.h.
  *
- * Boxes (128×64): column x=108..127; Home y=1..20, Encoder y=22..41 (split at
- * y=31), Select y=43..62 — 1px gaps top/bottom/between.
+ * Boxes (128×64): column x=108..127. Home y=1..18 (18px), Encoder y=20..43 (24px,
+ * split at y=32 → two ~12px cells), Select y=45..62 (18px) — the encoder box is
+ * widened 4px (2 from each neighbour) so its two cells aren't cramped. 1px gaps.
  */
 #include "hint_bar.h"
 #include "sh1106.h"
@@ -37,20 +38,20 @@ static void label(int row, const char *s)
 
 void hint_bar_draw(const control_hints_t *h)
 {
-    /* Home — OS-fixed (box y1..20, label ~row 1 = y8..15). */
-    box(1, 20);
+    /* Home — OS-fixed (box y1..18, label ~row 1 = y8..15). */
+    box(1, 18);
     label(1, "HOM");
 
-    /* Encoder — box y22..41, split at y31: rotate (row 3 ≈ y24..31), push (row 4 ≈ y32..39). */
-    box(22, 41);
-    hline(X0, X1, 31);
+    /* Encoder — box y20..43, split at y32: rotate (row 3 ≈ y24..31), push (row 4 ≈ y32..39). */
+    box(20, 43);
+    hline(X0, X1, 32);
     label(3, (h && h->rotate) ? h->rotate : "<>");
     if (h && h->click) {
         label(4, h->click);
     }
 
-    /* Select — box y43..62, label ~row 6 = y48..55. */
-    box(43, 62);
+    /* Select — box y45..62, label ~row 6 = y48..55. */
+    box(45, 62);
     if (h && h->select) {
         label(6, h->select);
     }
