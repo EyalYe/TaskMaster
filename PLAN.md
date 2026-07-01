@@ -838,14 +838,19 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
    `docs/APP_API.md` §8.
    - **Cancellation must be cooperative — never `vTaskDelete` a blocked worker.** A worker stuck in
      `esp_http_client_perform()` holds an open socket + a ~40 KB TLS session; hard-killing it **orphans
-     that memory** (a silent leak that defeats §6A.4). `async_job_cancel()` instead (a) sets a
-     **cancel flag** the worker polls, and (b) **aborts the blocked I/O** — e.g. `esp_http_client_close()`
-     on the in-flight client handle — so `perform()` returns, the worker frees *its own* resources and
-     exits. The job exposes a cancel hook (the work registers its client handle) so core can abort it.
-   - **`exit()` runs on the UI task and must stay fast**, so it *requests* cancel + abort and returns;
-     it does **not** join a worker that could be on a multi-second TLS timeout. The app's result buffer
-     is only written by `done_fn` (UI task), so once cancelled, no late write can touch freed app state.
-     A `done_fn` that arrives after the app has exited is dropped (core checks the job is still live).
+     that memory** (a silent leak that defeats §6A.4). `async_job_cancel()` sets a **cancel flag** the
+     worker polls (in its read loop) and bails; the worker frees *its own* client + returns.
+   - **The client handle is worker-LOCAL, and the UI thread never touches it (step-13 correction).** An
+     earlier design had the abort hook call `esp_http_client_close()` on the in-flight handle from the
+     UI task to unblock a read — but `esp_http_client` is **not thread-safe**, so closing it while the
+     worker is inside `read()`/`open()` is a data race that **crashed on Home-mid-fetch** (verified:
+     repeated reboots; fixed → zero reboots). So cancel is flag-only; a cancelled fetch simply runs to
+     completion in the worker (bounded by `timeout_ms`) and its result is dropped by `deliver`. The
+     `async_job_on_cancel` abort hook remains for *thread-safe* signals only.
+   - **`exit()` runs on the UI task and must stay fast**, so it *requests* cancel and returns; it does
+     **not** join a worker that could be on a multi-second TLS timeout. `work` only ever touches the
+     core-owned **ctx copy** (never app statics), and `done_fn` is skipped once cancelled — so a worker
+     that keeps running after the app exits can never write into freed app state.
 9. **App-side task model + render (thin, per app).** ✅ **Done.** `tasks.[ch]` in the app repo: a
    bounded `task_t[]` (§6A.1) + a `task_view` that formats tasks into `ui_list` rows — priority marker
    `P1..P4` (P1 = highest) + `parent_id` nesting (indent) + title; empty state "No open tasks". Built +
@@ -902,14 +907,30 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
     - **Replay on reconnect:** the UI task re-runs `render()` on every connectivity change, so
       `render()` detects the offline→online edge and drains the queue via **chained close/complete
       jobs** (`async_job`), then re-syncs — no extra task or timer. A failed replay is left queued and
-      retried on the next reconnect (no server hammering; poison-entry handling deferred to step 13).
+      retried on the next reconnect (no server hammering); a **poison entry** (keeps failing) is dropped
+      after `TASK_QUEUE_TRIES` attempts (step 13) so the queue can't wedge.
     - **Verified** via the Settings app's **Wi-Fi: On/Off** toggle (§7A.4): toggle off → offline banner
       + cached list + `OFF` hint; complete → queued; toggle Wi-Fi on → replay `close … ok=1 status=204`
       then re-sync. (A replay that can't reach its server — e.g. the Local LAN server from a foreign
       network — stays queued and retries on the next reconnect, as designed.)
-13. **Harden + §6A.4 gate.** Bounded buffers, capped task count, source-down → error over cached data;
-    run the leak harness on each source app incl. **Home fired mid-fetch** — now the real case, since
-    `async_job_cancel()` on `exit()` is exactly what prevents the worker writing into freed memory.
+13. **Harden + §6A.4 gate.** ✅ **Done + verified on hardware.**
+    - **Home fired mid-fetch — found + fixed a crash.** The abort hook closed the shared
+      `esp_http_client` handle from the UI task while the worker was inside `read()`/`open()` — a data
+      race (client isn't thread-safe) that **rebooted the device** on Home-mid-fetch. Fix: the handle is
+      now **worker-local**, cancel is **flag-only** (read loop polls `async_job_cancelled()`), the UI
+      thread never touches the client. Re-verified: the exact repro now shows **zero reboots / zero
+      panics** across ~15 fast open→Home cycles. Docs corrected (`async_job.h`, step 8 above).
+    - **Poison-queue guard.** A queued write that keeps failing is dropped after `TASK_QUEUE_TRIES` (5)
+      so a bad id / permanently-unreachable server can't wedge the queue + OFFLINE banner forever;
+      transient fails still retry on the next reconnect.
+    - **§6A.4 leak gate.** The launch→Home→relaunch harness under `CONFIG_HEAP_POISONING_COMPREHENSIVE`
+      **PASSes on all 4 apps** (Hello / Local / Yapp / Settings) — 100-cycle deltas −44/−36/−48/−12 B
+      (noise, not linear), heap integrity clean. (Hello's 20-cycle −336 was one-time NVS write-cache,
+      confirmed one-time by the flat 100-cycle result — a real leak would be ~−1680.)
+    - **Bounds/caps audited:** body reads hard-capped (`YAPP_BODY_MAX`/`LOCAL_BODY_MAX`), `TASK_MAX`
+      tasks, `TASK_QUEUE_MAX` queued writes, `strlcpy`/`snprintf` throughout. **Source-down → cached:** a
+      failed sync sets the error flag but never clears `s_view`, so the cached list keeps rendering
+      (the "Sync failed" screen shows only when there's no cache).
 
 #### 8.5.4 Design decisions / defaults (revisit if needed)
 - **Tasks are userspace; core stays task-free** (§8). Core's only task-enabling additions are the

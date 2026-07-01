@@ -11,10 +11,17 @@
  *    pointer to that copy. So even if the app is torn down mid-fetch, the worker
  *    only ever touches the core copy — no use-after-free.
  *  - Cancellation is **cooperative**: `async_job_cancel()` (call it from the app's
- *    exit()) sets a flag AND fires your registered abort hook (e.g.
- *    esp_http_client_close()) so a blocked `work` unwinds; it never vTaskDeletes a
- *    worker mid-perform() (which would orphan the socket + TLS session). A
- *    cancelled job's `done` is **not** called.
+ *    exit()) sets a flag; `work` must poll `async_job_cancelled()` in its loops and
+ *    bail. It never vTaskDeletes a worker mid-perform() (which would orphan the
+ *    socket + TLS session). A cancelled job's `done` is **not** called, and because
+ *    `work` only touches the core-owned ctx copy, a cancelled worker that keeps
+ *    running until its I/O times out never writes into freed app state.
+ *  - **Do NOT tear down a non-thread-safe handle from the abort hook.** The abort
+ *    hook (async_job_on_cancel) fires on the UI task; calling e.g.
+ *    esp_http_client_close() on a handle the worker is simultaneously inside
+ *    (read/perform) is a data race that CRASHES (esp_http_client isn't thread-safe,
+ *    step 13). Keep the client handle worker-local and cancel via the flag; reserve
+ *    the abort hook for genuinely thread-safe signals only.
  *
  * Single worker: one job at a time; submit returns NULL if busy.
  */
@@ -31,9 +38,9 @@
 
 typedef struct async_job async_job_t;
 
-/* Runs on the WORKER. Read inputs from `ctx`, write results into `ctx`. Register
- * an abort hook for blocking calls; check async_job_cancelled() in long loops.
- * Return true on success. */
+/* Runs on the WORKER. Read inputs from `ctx`, write results into `ctx`. Keep any
+ * client handle worker-local and poll async_job_cancelled() in long loops (do not
+ * tear a non-thread-safe handle down from the UI thread). Return true on success. */
 typedef bool (*async_work_fn)(async_job_t *job, void *ctx);
 
 /* Runs on the UI task after `work` finishes — skipped if the job was cancelled.
