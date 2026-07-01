@@ -41,7 +41,7 @@ repos — you don't have to clone them manually.
 Core⟂userspace is a hard rule: core knows only the **stable app API** (`device_app_t` +
 helper headers) and the **REST contract** (PLAN §8.1); it never names a specific app.
 
-## 3. Status — Phases 0–4 complete, Phase 5 next
+## 3. Status — Phases 0–4 complete, Phase 5 (core UX completion) next
 
 | Phase | Milestone | State |
 |---|---|---|
@@ -49,8 +49,9 @@ helper headers) and the **REST contract** (PLAN §8.1); it never names a specifi
 | 2 | Paste-from-phone Wi-Fi provisioning (SoftAP captive form → NVS) | ✅ |
 | 3 | LVGL UI + **tasks in userspace** (Yapp direct-Todoist, Local LAN), offline cache + replay, detail submenu, hide-when-unconfigured | ✅ |
 | 4 | **Settings hub** (schema-driven editor + confirm dialog), device info, startup, brightness, timeout+blank, deep/light sleep, delete-per-app-data, restart, factory reset, per-app knobs, **OTA** | ✅ |
-| 5 | **BLE provisioning** (NimBLE) | ◀ next |
-| 6 | App-ecosystem hardening (per-app NVS budgets, sandboxing) | planned |
+| 5 | **Core UX completion** — Launcher status bar (time/weather/connectivity) + glyph hint bar + core cohesion (§6C / §6C.1) | ◀ next |
+| 6 | **External developers + platform** — `app_gpio` arbitration, per-app NVS budgets, sandboxing, Pomodoro example app, API versioning | planned |
+| — | **Parked:** BLE provisioning (needs a phone app + Wi-Fi-only; a nicety over the no-app SoftAP form) | future |
 
 Everything above is **verified on hardware**. Details + the stepped build orders are in
 PLAN.md (Phase 3 = §8.5; Phase 4 = §8A.1).
@@ -173,9 +174,11 @@ Yes**. It writes the spare slot, reboots into it, and self-confirms (rollback on
    as the first message to a fresh Claude Code session.
 4. `idf.py set-target esp32c3 && idf.py build`, then flash the board.
 5. Read this file + `PLAN.md` (§8A.1 for Phase 4 detail, roadmap table near the end).
-6. **Next up: Phase 5 — BLE provisioning (NimBLE).** PLAN notes: use NimBLE (not
-   Bluedroid — ~500 KB) and trim BLE Kconfig so the OTA-slot budget still fits (§9.1);
-   provision Wi-Fi over GATT as an alternative/companion to the SoftAP portal.
+6. **Next up: Phase 5 — core UX completion** (PLAN §6C / §6C.1): the **Launcher status
+   bar** (connectivity glyph + NTP time + weather, online + city set), the **glyph hint
+   bar** (the `icons/` assets replace the ≤3-char text labels), and a **cohesion pass**
+   tying core together. BLE provisioning is **parked** (needs a dedicated phone app +
+   carries only Wi-Fi creds — a nicety over the no-app SoftAP form).
 
 ## 10. Pointers
 

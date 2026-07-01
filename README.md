@@ -16,7 +16,10 @@ progress. The current stepped plan lives in [`PLAN.md`](PLAN.md).
 | **2** | **Paste-from-phone provisioning** — SoftAP captive form writes Wi-Fi + app config to NVS | ✅ |
 | **3** | **LVGL UI + tasks in userspace** — Todoist (direct HTTPS) and LAN task apps; offline cache + write replay; the Settings hub | ✅ |
 | **4** | **Settings hub** (schema-driven) + power/idle (blank, light sleep) + **OTA update** | ✅ |
-| **5** | BLE provisioning | ◀ next |
+| **5** | **Core UX completion** — Launcher status bar (time · weather · connectivity) + glyph hint bar + core cohesion | ◀ next |
+| **6** | **External developers + platform** — GPIO arbitration, per-app NVS budgets, sandboxing, example app, API versioning | planned |
+
+*(BLE provisioning is parked — a nicety over the no-app SoftAP form; revisit if iOS setup becomes a pain.)*
 
 ## What the device does today (Phase 4)
 

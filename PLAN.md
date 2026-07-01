@@ -46,13 +46,15 @@ new apps added by implementing one interface struct, nothing else.
   apps** (the **Launcher** and **Settings** — the device hub that includes Wi-Fi setup) vs. removable
   manifest-driven user apps (§6).
 
-### Post-MVP — after v1.0 is stable (build Phase 5, §14)
-> Naming note: "Phase 5" here is the **build phase** in §14. (An earlier draft called this set
-> "Phase 2," which collided with the build Phase 2 = provisioning; that label is retired.)
-- **BLE provisioning** as a second transport (trivial alongside SoftAP in ESP-IDF) (§7).
-- Direct Todoist integration on-device (bypass the proxy) — see §8.4 stretch.
-- **Pomodoro** bundled example *user app* (removable) — validates framework extensibility for outside
-  developers (§6).
+### After the MVP (Phases 0–4.5, done) — the roadmap (§14)
+- **Phase 5 — core UX completion:** the Launcher **status bar** (connectivity glyph + NTP time +
+  weather) + the **glyph hint bar** + tying core functionality together (§6C / §6C.1).
+- **Phase 6 — external developers + platform:** `app_gpio` arbitration, per-app NVS budgets,
+  sandboxing, a **Pomodoro** removable example *user app* (extensibility proof), app-API versioning +
+  build tooling.
+- **Parked / future:** **BLE provisioning** as a 2nd Wi-Fi transport (needs a dedicated phone app +
+  carries only Wi-Fi creds — a nicety over the no-app SoftAP form; revisit if iOS setup becomes a pain).
+  *(Direct Todoist integration landed in Phase 3; app-declared config in Phase 3 too.)*
 
 ### Non-Goals (v1)
 - Multi-account / multiple simultaneous backends per source.
@@ -344,9 +346,9 @@ There is **no status bar** *(in MVP)* — connectivity/sync is surfaced by apps 
 `net_status.h`), not an OS-reserved strip. Cost is tiny: the bar redraws only when hints change
 (on-demand, §4.2). *(A rich status bar returns post-MVP — see §6C.)*
 
-### 6C. Future UI upgrade — glyph hint bar + rich status bar (post-MVP, NOT Phase 3)
-Two related UI upgrades, **deferred** (assets staged in `icons/`: `home`, `scroll`, `reset`,
-`connected`, `not_connected`, …). Decisions beyond the sketch below are left for when we build it.
+### 6C. Core UX completion — glyph hint bar + rich status bar (**Phase 5**)
+Two related UI upgrades, now the heart of **Phase 5** (assets staged in `icons/`: `home`, `scroll`,
+`reset`, `connected`, `not_connected`, …). The build order is §6C.1 below.
 
 1. **Hint-bar glyphs.** Replace the ≤3-char text labels (`HOM`/`<>`/`OPN`) with **1-bit glyphs** in the
    20px boxes (the `icons/` assets). The `control_hints_t` contract is unchanged — only the rendering
@@ -363,8 +365,31 @@ Two related UI upgrades, **deferred** (assets staged in `icons/`: `home`, `scrol
      second API call (same provider likely).
 
    This stays clear of the apps entirely (it's Launcher chrome), and reconciles with §6's MVP "no status
-   bar" — apps never get one; the Launcher gains this only online + post-MVP. Open (decide later): which
-   weather/timezone API; sync intervals; where the city/time/weather service lives; glyph asset format.
+   bar" — apps never get one; the Launcher gains this only online + with a city set.
+
+### 6C.1 Phase 5 — build order (core UX completion)
+**Theme:** finish the shell so the device feels whole before opening to third-party devs (Phase 6).
+Nothing here touches the app API — it's Launcher/hint-bar chrome + two small core services (time,
+weather). Verify each step on hardware.
+
+1. **Glyph hint bar.** Convert the `icons/` SVGs → **1-bit LVGL glyphs** sized for the 20 px hint boxes;
+   render them in the Home / encoder / Select cells. `control_hints_t` is **unchanged** — a label maps
+   to a glyph where one exists, else falls back to the ≤3-char text (so apps needn't change).
+2. **NTP time (core service).** `esp_sntp` synced at a sensible interval once online; a small core API
+   for the current local time. Timezone comes from the city (step 4) so the time is correct.
+3. **City config.** A city entered at provisioning — a **core** `nvs_config` field (it drives core
+   time/weather, not an app), collected in the Setup form. Empty city → no time/weather.
+4. **Weather + timezone.** Two API calls keyed by the city (timezone so NTP shows local time; weather
+   for the bar), run via `async_job`. **Decide:** provider/API + key handling + refresh cadence.
+5. **Launcher status bar.** A top strip on the **Launcher only** (apps unaffected): connectivity glyph +
+   time + weather — shown only when **online + city set**; offline / Wi-Fi-off / no-city → today's plain
+   list.
+6. **Cohesion pass.** Consistent glyphs/hints across Launcher + Settings + task apps; graceful
+   API-error / Wi-Fi-loss screens; tidy loose ends so core feels finished.
+
+**Open decisions (settle at build time):** weather/timezone provider (+ API-key story); refresh
+cadences; the glyph asset pipeline (SVG → LVGL C array); whether the status bar ever shows outside the
+Launcher.
 
 ### Apps — core (built-in, non-removable) vs. user (manifest-driven, removable)
 
@@ -1307,14 +1332,16 @@ headers, §6) and the **device REST contract** (§8.1).
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
 | **2 — Provisioning portal** ✅ | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
 | **3 — UI foundation + userspace tasks** ✅ | LVGL UI foundation (done, Part A); then **tasks in userspace** (§8): core gains generic `ui_list` + `async_job`, **task model/sync purged from core**; the **Yapp app pulls Todoist directly** (no proxy) + the **Local app** over its LAN contract; offline honors `WIFI_EN` | **Done + verified on hardware:** core is task-free; both source apps show priority-sorted, nested tasks via the generic list; complete + postpone + on-demand description (detail submenu) work; **Wi-Fi-off shows cached tasks + OFFLINE**, writes queue + replay on reconnect; apps hide until configured; §6A.4 leak gate passes on all 4 apps; the Home-mid-fetch cancel crash was found + fixed |
-| **4 — Settings + power** ◀ next | Finish the **Settings hub** (§6) as a **schema-driven** menu (§8A.1): a generic knob-editor + confirm dialog (step 0), then device info (incl. **fw version/build date**) / restart / factory reset, startup target, **brightness**, timeout, deep-sleep; per-app `ACFG_KNOB` via the same editor; OTA-stub. Idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓). *(Sync interval is app-owned, not here; long-press stays out of core nav.)* | Settings menu navigates; one editor drives every knob (core + per-app); startup target, brightness, deep-sleep toggle, timeout persist and take effect; factory reset/restart work behind a confirm; screen blanks on idle; **system reaches light sleep when idle** |
-| **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
-| **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
-| **6 — App-ecosystem hardening** *(when a real third-party ecosystem materializes)* | Make the app platform safe to host untrusted apps: **per-app NVS budget enforcement** + `nvs` partition sizing (§9.3); namespace-**collision hardening** beyond docs; an **`app_gpio` claim/release service** (publish the free pads D6/D7/D8/D9 + shared I²C, reject core-owned pins + double-claims, require release on `exit()`) — until then GPIO access is unmanaged convention (docs/APP_API.md §9, board_pins.h); broader app sandboxing as needed | Apps can't exhaust NVS or crowd out core/provisioning; collisions detected; two apps can't fight over a pin and an app can't grab a core pin |
-| | *(App-declared config in the form/Settings — formerly here — was pulled forward to Phase 3 (§9.4) as it's foundational to the core⟂userspace split.)* | |
+| **4 — Settings + power** ✅ | Finish the **Settings hub** (§6) as a **schema-driven** menu (§8A.1): a generic knob-editor + confirm dialog (step 0), then device info (incl. **fw version/build date**) / restart / factory reset, startup target, **brightness**, timeout, deep-sleep; per-app `ACFG_KNOB` via the same editor; OTA-stub. Idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓). *(Sync interval is app-owned, not here; long-press stays out of core nav.)* | Settings menu navigates; one editor drives every knob (core + per-app); startup target, brightness, deep-sleep toggle, timeout persist and take effect; factory reset/restart work behind a confirm; screen blanks on idle; **system reaches light sleep when idle** |
+| **4.5 — OTA path** ✅ | `esp_https_ota` + rollback | Done: device pulls an image from `fw_url`, boots the new slot, self-confirms / rolls back (verified) |
+| **5 — Core UX completion** ◀ next | Tie the core together + finish the shell UI (§6C.1): **glyph hint bar** (the `icons/` 1-bit glyphs replace the ≤3-char text labels, text fallback kept), a **Launcher status bar** (connectivity glyph + **NTP time** + **weather**, shown online + with a city set), an **NTP time** core service + **city** provisioning field + timezone/weather API, and a **cohesion pass** — consistent glyphs/hints across Launcher + Settings and graceful API/Wi-Fi-loss error screens | Hint boxes show glyphs; the Launcher shows time + weather + connectivity when online with a city (its plain list otherwise); core screens feel consistent; API/Wi-Fi errors degrade gracefully |
+| **6 — External developers + platform** | Make the platform safe + pleasant to host third-party apps: an **`app_gpio` claim/release service** (free pads D6/D7/D8/D9 + shared I²C; reject core-owned pins + double-claims; release on `exit()` — until then it's unmanaged convention, docs/APP_API.md §9); **per-app NVS budget enforcement** + `nvs` sizing (§9.3); namespace-**collision hardening**; broader **sandboxing**; a **Pomodoro** removable example *user app* (extensibility proof); **app-API versioning + build tooling** (semver the app API; a config-repo → flashable `.bin` flow) | Apps can't exhaust NVS, grab a core pin, or fight over a pin; a third-party non-task app ships cleanly; the app API is versioned |
+| | *(**Parked / future:** **BLE provisioning** as a 2nd Wi-Fi transport — it needs a dedicated phone app and carries only Wi-Fi creds, so it's a nicety over the no-app SoftAP browser form; revisit if iOS setup becomes a real pain. Direct Todoist + app-declared config were pulled forward to Phase 3.)* | |
 
-Phases 0–4.5 = MVP. Phase 5 = hardening + post-MVP. Phase 6 = app-ecosystem hardening (deferred until
-third-party apps are a real concern).
+Phases 0–4.5 = MVP (**done + verified on hardware**). Phase 5 = **core UX completion** (the Launcher
+status bar + glyph hint bar + tying core together, §6C.1). Phase 6 = **external developers + platform**
+(app_gpio, per-app NVS budgets, sandboxing, a Pomodoro example, API versioning). BLE provisioning is
+**parked** (a nicety over the no-app SoftAP form — revisit if iOS setup hurts).
 
 > **Current state (2026-06-30):** Phases 0–2 complete and **verified on hardware** (XIAO ESP32-C3) on
 > ESP-IDF v6.0.1. Phase 2 closed end to end: paste-from-phone form → NVS → reboot → **associates with

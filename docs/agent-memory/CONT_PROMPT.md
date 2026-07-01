@@ -22,7 +22,9 @@ is a resumed session on a new machine.
 **Current state:** Phases 0–4 are complete and verified on hardware (Settings hub with a
 schema-driven editor, device info, startup, brightness, timeout+screen-blank, deep/light
 sleep, delete-per-app-data, restart, factory reset, per-app knobs, and OTA). All three
-repos are pushed. **Next up is Phase 5 — BLE provisioning (NimBLE).**
+repos are pushed. **Next up is Phase 5 — core UX completion** (PLAN §6C / §6C.1): the
+Launcher status bar (connectivity glyph + NTP time + weather) + the glyph hint bar (the
+`icons/` assets) + a cohesion pass. BLE provisioning is **parked** (see the roadmap).
 
 **Hard rules (do not violate):**
 - **No magic numbers** — every numeric literal is a named `#define`/enum in a header
@@ -51,6 +53,6 @@ idf.py build && idf.py -p "$(ls /dev/cu.usbmodem* | head -1)" flash
 - Deleting `sdkconfig` resets target to esp32 → re-run `idf.py set-target esp32c3`.
 
 **How to proceed:** confirm the build is green on this machine, then ask the user whether
-to start Phase 5 (BLE provisioning) or address something else. Work step-by-step and
+to start Phase 5 (core UX completion — status bar + glyphs) or address something else. Work step-by-step and
 verify on hardware (the user tests interactively and expects each step flashed + checked).
 Don't restate this prompt back — just get oriented and continue.
