@@ -356,14 +356,19 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
 };
 /* Live rows = the core template above + one appended row per app ACFG_KNOB field. */
 #define MAX_APP_KNOBS     16
-#define SETTINGS_MAX_ROWS (SI_COUNT + MAX_APP_KNOBS)
+#define MAX_APP_ROWS      24        /* knob rows + one "setup" row per app */
+#define APP_LABEL_MAX     20        /* "<app> setup" */
+#define SETTINGS_MAX_ROWS (SI_COUNT + MAX_APP_ROWS)
 
 static setting_item_t s_rows[SETTINGS_MAX_ROWS];
 static int            s_row_count;
 static app_knob_ctx_t s_knob_ctx[MAX_APP_KNOBS];
+static char           s_app_labels[MAX_APP_ROWS][APP_LABEL_MAX];
+static int            s_label_n;
 
 /* Build the live rows: copy the core template, wire the dynamic startup choices, then
- * append each installed app's ACFG_KNOB fields (§9.4) — core names no app. */
+ * append per app (§9.4, core names no app): its ACFG_KNOB fields as editable rows, and
+ * — if it has any ACFG_PASTE field — an "<app> setup" action that opens the form. */
 static void settings_build_rows(void)
 {
     memcpy(s_rows, SETTINGS_ITEMS, sizeof(SETTINGS_ITEMS));
@@ -372,12 +377,18 @@ static void settings_build_rows(void)
     s_rows[SI_STARTUP].choice_count = s_startup_count;
 
     int kc = 0;
+    s_label_n = 0;
     for (unsigned g = 0; g < app_config_group_count() && s_row_count < SETTINGS_MAX_ROWS; g++) {
         const app_cfg_group_t *grp = app_config_group(g);
-        for (unsigned k = 0; k < grp->count && s_row_count < SETTINGS_MAX_ROWS && kc < MAX_APP_KNOBS; k++) {
+        bool has_paste = false;
+        for (unsigned k = 0; k < grp->count && s_row_count < SETTINGS_MAX_ROWS; k++) {
             const app_cfg_field_t *f = &grp->fields[k];
-            if (f->input != ACFG_KNOB) {
-                continue;               /* ACFG_PASTE is set via the form / Wi-Fi setup */
+            if (f->input == ACFG_PASTE) {
+                has_paste = true;
+                continue;               /* pasted via the form, not knob-edited */
+            }
+            if (f->input != ACFG_KNOB || kc >= MAX_APP_KNOBS) {
+                continue;
             }
             s_knob_ctx[kc] = (app_knob_ctx_t){ .ns = grp->ns, .f = f };
             setting_item_t *row = &s_rows[s_row_count++];
@@ -394,6 +405,16 @@ static void settings_build_rows(void)
                 row->max  = (int)f->max;
                 row->step = 1;
             }
+        }
+        /* Paste-only config (URLs/tokens) isn't knob-editable — give the app a
+         * discoverable "setup" entry that re-opens the provisioning form. */
+        if (has_paste && s_row_count < SETTINGS_MAX_ROWS && s_label_n < MAX_APP_ROWS) {
+            snprintf(s_app_labels[s_label_n], APP_LABEL_MAX, "%s setup", grp->name);
+            setting_item_t *row = &s_rows[s_row_count++];
+            memset(row, 0, sizeof(*row));
+            row->label  = s_app_labels[s_label_n++];
+            row->kind   = SETTING_ACTION;
+            row->action = act_wifi_setup;   /* opens the paste-from-phone portal */
         }
     }
 }
