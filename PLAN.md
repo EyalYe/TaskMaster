@@ -380,10 +380,15 @@ weather). Verify each step on hardware.
    API (`time_now()` / a formatted string). *No UI yet* → verify the sync in a log / a temp readout.
 3. **City config.** A **core** `nvs_config` field `city` (it drives core time/weather, not an app),
    collected in the Setup form. → set a city, persists; empty → no time/weather.
-4. **Weather (one API — gives the timezone too).** An `async_job` calls a weather provider keyed by
-   `city`; the response carries **current weather *and* the timezone offset** (e.g. OpenWeatherMap
-   returns `timezone`), so **local time = NTP UTC + offset** — no separate timezone API. Cache both;
-   refresh on a cadence. **Decide:** provider + API-key handling + refresh interval.
+4. **Weather + timezone (keyless — Open-Meteo, decided).** Use **Open-Meteo** (free, **no API key**,
+   HTTPS) so nothing has to be registered/baked — ideal for the zero-toolchain onboarding (§6D). Two
+   keyless `async_job` calls, same provider: (a) **geocode** the city →
+   `geocoding-api.open-meteo.com/v1/search?name=<city>&count=1` → `{latitude, longitude, timezone}`;
+   (b) **forecast** → `api.open-meteo.com/v1/forecast?latitude=..&longitude=..&current=temperature_2m,
+   weather_code&timezone=auto` → current temp + a WMO `weather_code` + **`utc_offset_seconds`**. So
+   **local time = NTP UTC + offset** (DST-correct) and weather come from one keyless provider. Map the
+   WMO `weather_code` to a small glyph/word table. Cache both; refresh ~15–30 min. *(Free tier is
+   non-commercial — fine here.)*
 5. **Launcher status bar.** A top strip on the **Launcher only** (apps unaffected): connectivity glyph +
    local time + weather — shown **only when online + city set**; offline / Wi-Fi-off / no-city → today's
    plain list. Composes steps 2+4.
@@ -391,8 +396,9 @@ weather). Verify each step on hardware.
    API-error / Wi-Fi-loss screens; tidy loose ends so core feels finished.
 
 **Dependencies:** 1 is standalone; 5 needs 2 + 4; 4 needs 3; 6 is last. **Open decisions (settle at
-build time):** weather provider (+ API-key story) + refresh cadence; the glyph asset pipeline (SVG →
-LVGL C array); whether the status bar ever shows outside the Launcher.
+build time):** refresh cadence; the glyph asset pipeline (SVG → LVGL C array); the WMO code→glyph
+table; whether the status bar ever shows outside the Launcher. *(Weather/timezone provider is decided —
+keyless Open-Meteo, step 4.)*
 
 ### 6D. Zero-toolchain onboarding (Phase 6) — CI build + web flash + OTA
 
