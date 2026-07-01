@@ -8,6 +8,7 @@
  */
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include <string.h>
 
 #include "sh1106.h"
 #include "input.h"
@@ -81,6 +82,25 @@ void app_main(void)
     } else {
         ESP_LOGI(TAG, "provisioned + Wi-Fi on -> STA connect");
         wifi_mgr_start_sta();
+    }
+
+    /* Startup target (§8A): boot into a chosen app instead of the Launcher, unless we
+     * already picked provisioning above. Falls back to the Launcher if the target is
+     * unset / stale / currently unavailable (unconfigured). */
+    if (initial == NULL && provisioned) {
+        char tgt[16] = {0};
+        config_get_str("startup_tgt", tgt, sizeof(tgt));
+        if (tgt[0] != '\0') {
+            for (unsigned i = 0; i < app_manager_count(); i++) {
+                const device_app_t *a = app_manager_get(i);
+                if (a && a->name && strcmp(a->name, tgt) == 0 &&
+                    (a->available == NULL || a->available())) {
+                    initial = a;
+                    ESP_LOGI(TAG, "startup target -> %s", a->name);
+                    break;
+                }
+            }
+        }
     }
 
     /* The UI task owns the screen, app lifecycle, and Home from here. */

@@ -18,6 +18,7 @@
 #include "wifi_mgr.h"
 #include "net_status.h"
 #include "nvs_config.h"
+#include "app_manager.h"
 #include "ui_frame.h"
 #include "ui_list.h"
 #include "settings_menu.h"
@@ -30,6 +31,7 @@
 #include "esp_log.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static const char *TAG = "app.settings";
 
@@ -171,24 +173,78 @@ static void act_device_info(void)
     s_mode = MODE_INFO;
 }
 
+/* ── startup target (ENUM): "Launcher" or a specific app, honored at boot ── */
+#define STARTUP_TGT_MAX      16              /* matches the nvs_config startup_tgt size */
+#define SETTINGS_MAX_APPS    16              /* matches app_manager's registry cap */
+#define STARTUP_MAX_CHOICES  (1 + SETTINGS_MAX_APPS)  /* "Launcher" + each registered app */
+
+static const char *s_startup_choices[STARTUP_MAX_CHOICES];
+static int         s_startup_count;          /* built in init() from the app registry */
+
+/* Build "Launcher" + the registered app names (choice 0 = Launcher = default). */
+static void startup_build_choices(void)
+{
+    s_startup_choices[0] = "Launcher";
+    s_startup_count = 1;
+    unsigned n = app_manager_count();
+    for (unsigned i = 0; i < n && s_startup_count < STARTUP_MAX_CHOICES; i++) {
+        const device_app_t *a = app_manager_get(i);
+        if (a && a->name) {
+            s_startup_choices[s_startup_count++] = a->name;
+        }
+    }
+}
+
+static int startup_get(void)
+{
+    char t[STARTUP_TGT_MAX] = {0};
+    config_get_str("startup_tgt", t, sizeof(t));
+    if (t[0] == '\0') {
+        return 0;                            /* unset → Launcher */
+    }
+    for (int i = 1; i < s_startup_count; i++) {
+        if (strcmp(t, s_startup_choices[i]) == 0) {
+            return i;
+        }
+    }
+    return 0;                                /* stale target → Launcher */
+}
+
+static void startup_set(int idx)
+{
+    config_set_str("startup_tgt",
+                   (idx > 0 && idx < s_startup_count) ? s_startup_choices[idx] : "");
+}
+
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
- * ENUM/RANGE rows (startup / brightness / timeout) land in the following steps. */
-static const setting_item_t SETTINGS_ITEMS[] = {
-    { .label = "Wi-Fi",         .kind = SETTING_TOGGLE, .get = wifi_get, .set = wifi_set },
-    { .label = "Wi-Fi setup",   .kind = SETTING_ACTION, .action = act_wifi_setup },
-    { .label = "Device info",   .kind = SETTING_ACTION, .action = act_device_info },
-    { .label = "Restart",       .kind = SETTING_ACTION, .action = act_restart,
-      .confirm = "Restart device?" },
-    { .label = "Factory reset", .kind = SETTING_ACTION, .action = act_factory_reset,
-      .confirm = "Erase all settings?" },
+ * Indexed so a row's runtime bits (e.g. dynamic ENUM choices) can be filled in init. */
+enum {
+    SI_WIFI, SI_WIFI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_RESTART, SI_FACTORY, SI_COUNT
 };
-#define SETTINGS_ITEM_COUNT ((int)(sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0])))
+static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
+    [SI_WIFI]        = { .label = "Wi-Fi",       .kind = SETTING_TOGGLE,
+                         .get = wifi_get, .set = wifi_set },
+    [SI_WIFI_SETUP]  = { .label = "Wi-Fi setup", .kind = SETTING_ACTION,
+                         .action = act_wifi_setup },
+    [SI_DEVICE_INFO] = { .label = "Device info", .kind = SETTING_ACTION,
+                         .action = act_device_info },
+    [SI_STARTUP]     = { .label = "Startup",     .kind = SETTING_ENUM,
+                         .get = startup_get, .set = startup_set },  /* choices set in init */
+    [SI_RESTART]     = { .label = "Restart",     .kind = SETTING_ACTION,
+                         .action = act_restart,  .confirm = "Restart device?" },
+    [SI_FACTORY]     = { .label = "Factory reset", .kind = SETTING_ACTION,
+                         .action = act_factory_reset, .confirm = "Erase all settings?" },
+};
+#define SETTINGS_ITEM_COUNT SI_COUNT
 
 /* ── app lifecycle ── */
 static void settings_init(void)
 {
     s_portal_up = false;
     confirm_reset();                    /* never inherit a stale modal */
+    startup_build_choices();            /* dynamic ENUM choices from the app registry */
+    SETTINGS_ITEMS[SI_STARTUP].choices      = s_startup_choices;
+    SETTINGS_ITEMS[SI_STARTUP].choice_count = s_startup_count;
     settings_menu_init(&s_menu, SETTINGS_ITEMS, SETTINGS_ITEM_COUNT, SETTINGS_LIST_ROWS);
     if (s_enter_setup) {
         s_enter_setup = false;
