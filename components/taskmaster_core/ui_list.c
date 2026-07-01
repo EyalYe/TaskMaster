@@ -36,6 +36,12 @@ void ui_list_set_count(ui_list_t *l, int count)
     clamp_window(l);
 }
 
+void ui_list_set_rows(ui_list_t *l, int visible_rows)
+{
+    l->rows = visible_rows > 0 ? visible_rows : UI_LIST_DEFAULT_ROWS;
+    clamp_window(l);   /* keep the selection inside the resized window */
+}
+
 void ui_list_move(ui_list_t *l, int delta)
 {
     if (l->count <= 0) {

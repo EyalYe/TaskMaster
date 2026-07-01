@@ -33,6 +33,7 @@ typedef struct {
 
 void ui_list_init(ui_list_t *l, int visible_rows);
 void ui_list_set_count(ui_list_t *l, int count);   /* clamps sel into range */
+void ui_list_set_rows(ui_list_t *l, int visible_rows); /* resize the window (e.g. to share the screen with a banner row) */
 void ui_list_move(ui_list_t *l, int delta);        /* move selection; wraps; keeps it visible */
 int  ui_list_sel(const ui_list_t *l);
 

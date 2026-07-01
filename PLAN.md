@@ -880,9 +880,24 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
       buffers the body but drops cJSON's node overhead; a true chunked SAX pass keeps memory flat — pick
       per measured headroom at build time.) **Fallback:** the `~/yapplocal`-style proxy stays a
       documented escape hatch if a real account proves too heavy to parse on-device.
-12. **Offline + write semantics.** `WIFI_EN=0` / dropped link → render **cached** `task_t[]` + an
-    `OFFLINE` marker, "Sync now" unavailable, writes **queued** (bounded) to replay on reconnect — one
-    path for both off-by-toggle and dropped (§8.3). Each app owns its cache (userspace).
+12. **Offline + write semantics.** ✅ **Done (built; on-hardware verification pending the Settings
+    Wi-Fi toggle).** `WIFI_EN=0` / dropped link → render **cached** `task_t[]` + an `OFFLINE` marker,
+    "Sync now" unavailable, writes **queued** (bounded) to replay on reconnect — one path for both
+    off-by-toggle and dropped (§8.3). Each app owns its cache (userspace).
+    - **Shared in `tasks.h`** (both apps, header-only, identical copies): an NVS-blob **cache** of the
+      `task_t[]` — saved on `exit()` (not per-sync, to bound flash wear), loaded on `init()` so tasks
+      show instantly even offline / after a reboot; a bounded **`task_queue_t`** (`TASK_QUEUE_MAX`) of
+      completes done offline, persisted immediately; and `task_view_render_offline()` which draws an
+      `OFFLINE` / `OFFLINE  N queued` banner (chosen UX) above the cached list, shrinking the `ui_list`
+      window by one row (new core `ui_list_set_rows()`).
+    - **One path:** everything keys off `!net_is_online()`, so a user toggle-off and a dropped link are
+      identical. Offline the click hint flips **SYN → OFF** (sync unavailable).
+    - **Replay on reconnect:** the UI task re-runs `render()` on every connectivity change, so
+      `render()` detects the offline→online edge and drains the queue via **chained close/complete
+      jobs** (`async_job`), then re-syncs — no extra task or timer. A failed replay is left queued and
+      retried on the next reconnect (no server hammering; poison-entry handling deferred to step 13).
+    - **Verification blocked:** no Settings app yet ⇒ no in-UI way to toggle Wi-Fi; test deferred until
+      the Settings Wi-Fi toggle lands, then run the offline→queue→reconnect→replay flow on both apps.
 13. **Harden + §6A.4 gate.** Bounded buffers, capped task count, source-down → error over cached data;
     run the leak harness on each source app incl. **Home fired mid-fetch** — now the real case, since
     `async_job_cancel()` on `exit()` is exactly what prevents the worker writing into freed memory.
