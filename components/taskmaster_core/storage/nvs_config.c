@@ -20,6 +20,7 @@ static const cfg_field_t s_schema[] = {
     { "wifi_ssid",   CFG_STR,  CFG_WP_PROVISION,  false,   32, "Wi-Fi SSID",            0, ""    },
     { "wifi_psk",    CFG_STR,  CFG_WP_PROVISION,  true,    64, "Wi-Fi password",        0, ""    },
     { "fw_url",      CFG_STR,  CFG_WP_PROVISION,  false,   96, "OTA firmware URL",      0, ""    },
+    { "city",        CFG_STR,  CFG_WP_PROVISION,  false,   48, "City (time/weather)",   0, ""    },
     { "startup_tgt", CFG_STR,  CFG_WP_SETTINGS,   false,   16, "Startup target",        0, ""    },
     { "wifi_en",     CFG_U8,   CFG_WP_SETTINGS,   false,    0, "Wi-Fi enabled",         1, NULL  },
     { "deep_sleep",  CFG_U8,   CFG_WP_SETTINGS,   false,    0, "Deep sleep",            0, NULL  },

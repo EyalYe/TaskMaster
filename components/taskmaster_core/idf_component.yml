@@ -4,3 +4,5 @@
 # see ui/lvgl_disp.c.
 dependencies:
   lvgl/lvgl: "^9.2"
+  # cJSON for the wx (weather/time) service — Open-Meteo JSON (§6C.1 steps 2-4).
+  espressif/cjson: "^1.7"

@@ -379,19 +379,18 @@ weather). Verify each step on hardware.
    app's ≤3-char text otherwise — `control_hints_t` unchanged, so apps needn't change. More glyphs =
    add to the generator dict + rerun. *(Home + rotate now; `RST`→reset / `DON`→check etc. can join in
    the cohesion pass.)*
-2. **NTP time (core service).** `esp_sntp` syncs **UTC** once online at a sensible cadence; a small core
-   API (`time_now()` / a formatted string). *No UI yet* → verify the sync in a log / a temp readout.
-3. **City config.** A **core** `nvs_config` field `city` (it drives core time/weather, not an app),
-   collected in the Setup form. → set a city, persists; empty → no time/weather.
-4. **Weather + timezone (keyless — Open-Meteo, decided).** Use **Open-Meteo** (free, **no API key**,
-   HTTPS) so nothing has to be registered/baked — ideal for the zero-toolchain onboarding (§6D). Two
-   keyless `async_job` calls, same provider: (a) **geocode** the city →
-   `geocoding-api.open-meteo.com/v1/search?name=<city>&count=1` → `{latitude, longitude, timezone}`;
-   (b) **forecast** → `api.open-meteo.com/v1/forecast?latitude=..&longitude=..&current=temperature_2m,
-   weather_code&timezone=auto` → current temp + a WMO `weather_code` + **`utc_offset_seconds`**. So
-   **local time = NTP UTC + offset** (DST-correct) and weather come from one keyless provider. Map the
-   WMO `weather_code` to a small glyph/word table. Cache both; refresh ~15–30 min. *(Free tier is
-   non-commercial — fine here.)*
+2–4. **Weather + time service (`net/wx.[ch]`). ✅ Done + verified on hardware.** One core service does
+   all three: **NTP** (`esp_sntp`) syncs UTC; a core `city` config field (Setup form) keys a **keyless
+   Open-Meteo** lookup — a background `wx_task` (off the UI task) **geocodes** the city →
+   `geocoding-api.open-meteo.com/v1/search` → lat/lon, then a **forecast** →
+   `api.open-meteo.com/v1/forecast?...&current=temperature_2m,weather_code&timezone=auto` → current
+   temp + WMO `weather_code` + **`utc_offset_seconds`**. **Local time = NTP UTC + offset** (DST-correct).
+   Getters `wx_time_str()` / `wx_weather()` / `wx_weather_desc()` (WMO→word); cached, refresh ~15 min,
+   retry ~30 s. **No API key / signup** (fits the §6D onboarding). Verified: `Petah Tikva` → geocode ok
+   → `25 C, code 2, offset 10800s` → local `01:25`. *(cJSON added to core; HTTPS via the cert bundle.)*
+   - **UX warts for the cohesion pass (step 6):** setting the city currently needs a full
+     re-provision (form re-enters Wi-Fi); an unrecognized city name silently yields no weather. Consider
+     an easier city edit + a "not found" hint.
 5. **Launcher status bar.** A top strip on the **Launcher only** (apps unaffected): connectivity glyph +
    local time + weather — shown **only when online + city set**; offline / Wi-Fi-off / no-city → today's
    plain list. Composes steps 2+4.

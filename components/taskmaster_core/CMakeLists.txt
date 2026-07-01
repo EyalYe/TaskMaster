@@ -24,10 +24,11 @@ idf_component_register(
         "storage/nvs_config.c"
         "storage/app_store.c"
         "storage/app_config.c"
-        # net/ — Wi-Fi owner, provisioning portal, connectivity status
+        # net/ — Wi-Fi owner, provisioning portal, connectivity status, weather/time
         "net/net_status.c"
         "net/wifi_mgr.c"
         "net/softap_portal.c"
+        "net/wx.c"
         # settings/ — the Settings hub app + its schema editor + confirm dialog
         "settings/app_settings.c"
         "settings/settings_menu.c"
@@ -50,12 +51,14 @@ idf_component_register(
         esp_netif
         esp_event
         esp_http_server
+        esp_http_client    # wx service: HTTPS GET to Open-Meteo (weather/time)
         lwip
         nvs_flash
         esp_timer
         esp_app_format     # esp_app_get_description() for the Device-info screen
         esp_https_ota      # OTA update from fw_url (Settings → Check update, step 7)
         bootloader_support # pulled in by esp_https_ota.h (bootloader_common.h)
-        esp-tls            # esp_crt_bundle_attach for the OTA HTTPS connection
+        esp-tls            # esp_crt_bundle_attach for OTA + wx HTTPS
         mbedtls            # esp_crt_bundle.h
+        espressif__cjson   # wx service: parse Open-Meteo JSON (declared in idf_component.yml)
 )

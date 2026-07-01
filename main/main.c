@@ -19,6 +19,7 @@
 #include "net_status.h"
 #include "nvs_config.h"
 #include "wifi_mgr.h"
+#include "wx.h"
 #include "lvgl_disp.h"
 #include "ui.h"
 
@@ -109,6 +110,10 @@ void app_main(void)
             }
         }
     }
+
+    /* Weather + time service (§6C.1): NTP + keyless Open-Meteo keyed by the `city`
+     * config. Its task waits for connectivity, so starting it here is fine. */
+    wx_init();
 
     /* The UI task owns the screen, app lifecycle, and Home from here. */
     ui_start(events, initial);
