@@ -171,6 +171,8 @@ Yes**. It writes the spare slot, reboots into it, and self-confirms (rollback on
 1. `git clone git@github.com:EyalYe/TaskMaster.git` (SSH access to the two app repos too).
 2. Install **ESP-IDF v6.0.1** (the project pins it; activate script path in §7).
 3. Restore the assistant memory: see [`docs/agent-memory/README.md`](docs/agent-memory/README.md).
+   Fastest bootstrap: paste [`docs/agent-memory/CONT_PROMPT.md`](docs/agent-memory/CONT_PROMPT.md)
+   as the first message to a fresh Claude Code session.
 4. `idf.py set-target esp32c3 && idf.py build`, then flash the board.
 5. Read this file + `PLAN.md` (§8A.1 for Phase 4 detail, roadmap table near the end).
 6. **Next up: Phase 5 — BLE provisioning (NimBLE).** PLAN notes: use NimBLE (not

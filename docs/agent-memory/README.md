@@ -25,4 +25,6 @@ Then start Claude Code in the repo — it loads `MEMORY.md` automatically. If th
 path differs from `/Users/yeminie/TaskMaster`, the memory content still applies (it's
 about the project, not the path), but update any `~/TaskMaster` references as needed.
 
-See [`SESSION1.md`](../../SESSION1.md) for the full session-1 handoff.
+See [`SESSION1.md`](../../SESSION1.md) for the full session-1 handoff, and
+[`CONT_PROMPT.md`](CONT_PROMPT.md) for a ready-to-paste prompt that bootstraps the next
+agent.
