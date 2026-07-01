@@ -7,11 +7,15 @@
 #include "ui_frame.h"
 #include "sh1106.h"          /* OLED_W / OLED_H */
 #include "lv_font_tm5x7.h"   /* thin 5x7 font for the hint labels */
+#include "hint_glyphs.h"     /* 1-bit hint-bar glyphs (§6C.1 step 1) */
+
+#include <string.h>
 
 static bool      s_inited;
 static lv_obj_t *s_content;
 static lv_obj_t *s_bar;          /* transparent full-screen layer holding the boxes */
 static lv_obj_t *s_rotate_lbl;
+static lv_obj_t *s_rotate_img;   /* scroll glyph shown for the default rotate hint */
 static lv_obj_t *s_click_lbl;
 static lv_obj_t *s_select_lbl;
 
@@ -36,6 +40,16 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *txt)
     return l;
 }
 
+/* A 1-bit glyph (A1 image) drawn in white — for the hint boxes (§6C.1 step 1). */
+static lv_obj_t *make_glyph(lv_obj_t *parent, const lv_image_dsc_t *dsc)
+{
+    lv_obj_t *img = lv_image_create(parent);
+    lv_image_set_src(img, dsc);
+    lv_obj_set_style_image_recolor(img, lv_color_white(), 0);
+    lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+    return img;
+}
+
 void ui_frame_init(void)
 {
     lv_obj_t *scr = lv_screen_active();
@@ -54,15 +68,18 @@ void ui_frame_init(void)
     lv_obj_set_pos(s_bar, 0, 0);
     lv_obj_set_size(s_bar, OLED_W, OLED_H);
 
-    /* Home (OS-fixed). */
+    /* Home (OS-fixed) — the house glyph. */
     lv_obj_t *home = make_box(s_bar, HINT_BAR_X, HINT_HOME_Y, HINT_BAR_W, HINT_HOME_H);
-    lv_obj_align(make_label(home, "HOM"), LV_ALIGN_CENTER, HINT_LBL_DX, 0);
+    lv_obj_align(make_glyph(home, &glyph_home), LV_ALIGN_CENTER, HINT_LBL_DX, 0);
 
     /* Encoder — split into rotate (top) / click (bottom) by a divider at mid.
-     * Nudge the two labels toward the divider (rotate down, click up). */
+     * Rotate cell shows the scroll glyph by default, or the app's text label.
+     * Nudge the two toward the divider (rotate down, click up). */
     lv_obj_t *enc = make_box(s_bar, HINT_BAR_X, HINT_ENC_Y, HINT_BAR_W, HINT_ENC_H);
     s_rotate_lbl = make_label(enc, "<>");
     lv_obj_align(s_rotate_lbl, LV_ALIGN_TOP_MID, HINT_LBL_DX, HINT_ROT_DY);
+    s_rotate_img = make_glyph(enc, &glyph_scroll);
+    lv_obj_align(s_rotate_img, LV_ALIGN_TOP_MID, HINT_LBL_DX, HINT_ROT_DY);
     lv_obj_t *divln = lv_obj_create(enc);
     lv_obj_remove_style_all(divln);
     lv_obj_set_size(divln, HINT_BAR_W - 2 * HINT_BOX_GAP, HINT_BOX_GAP);
@@ -139,7 +156,17 @@ void ui_frame_set_hints(const control_hints_t *h)
         lv_obj_set_size(s_content, OLED_W, OLED_H);     /* full width */
         return;
     }
-    lv_label_set_text(s_rotate_lbl, h->rotate ? h->rotate : "<>");
+    /* Rotate cell: the scroll glyph for the default hint (NULL or "<>"), else the
+     * app's text label (§6C.1 step 1 — text stays the fallback). */
+    bool rot_glyph = (h->rotate == NULL) || (strcmp(h->rotate, "<>") == 0);
+    if (rot_glyph) {
+        lv_obj_add_flag(s_rotate_lbl, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_rotate_img, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_label_set_text(s_rotate_lbl, h->rotate);
+        lv_obj_remove_flag(s_rotate_lbl, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_rotate_img, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_label_set_text(s_click_lbl,  h->click  ? h->click  : "");
     lv_label_set_text(s_select_lbl, h->select ? h->select : "");
     lv_obj_remove_flag(s_bar, LV_OBJ_FLAG_HIDDEN);

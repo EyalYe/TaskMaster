@@ -372,10 +372,13 @@ Two related UI upgrades, now the heart of **Phase 5** (assets staged in `icons/`
 Nothing here touches the app API — it's Launcher/hint-bar chrome + two small core services (time,
 weather). Verify each step on hardware.
 
-1. **Glyph hint bar.** Convert the `icons/` SVGs → **1-bit LVGL glyphs** sized for the 20 px hint boxes;
-   render them in the Home / encoder / Select cells. `control_hints_t` is **unchanged** — a label maps
-   to a glyph where one exists, else falls back to the ≤3-char text (so apps needn't change).
-   *Independent, immediately visible.* → hint boxes show icons.
+1. **Glyph hint bar. ✅ Done + verified on hardware.** `tools/gen_glyphs.py` rasterizes the `icons/`
+   SVGs → **1-bit LVGL A1 glyphs** (cairosvg + Pillow, alpha-thresholded — crisp, no AA; ASCII preview);
+   generated into `ui/hint_glyphs.[ch]`. `ui_frame` draws the **house** in the Home box and the
+   **scroll/reload** glyph in the rotate cell for the default hint (NULL or `"<>"`), falling back to the
+   app's ≤3-char text otherwise — `control_hints_t` unchanged, so apps needn't change. More glyphs =
+   add to the generator dict + rerun. *(Home + rotate now; `RST`→reset / `DON`→check etc. can join in
+   the cohesion pass.)*
 2. **NTP time (core service).** `esp_sntp` syncs **UTC** once online at a sensible cadence; a small core
    API (`time_now()` / a formatted string). *No UI yet* → verify the sync in a log / a temp readout.
 3. **City config.** A **core** `nvs_config` field `city` (it drives core time/weather, not an app),

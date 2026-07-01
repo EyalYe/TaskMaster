@@ -13,6 +13,7 @@ idf_component_register(
         "ui/ui_frame.c"
         "ui/ui_list.c"
         "ui/hint_bar.c"
+        "ui/hint_glyphs.c"
         "ui/launcher.c"
         "ui/lv_font_tm_sans.c"
         "ui/lv_font_tm5x7.c"
