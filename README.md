@@ -69,16 +69,22 @@ Home-held-at-reset is the escape hatch to re-provision even with bad/stale crede
 main/                          thin composition root: NVS → Wi-Fi init → OLED →
   main.c                       input → boot-mode branch → UI task
   idf_component.yml            APP MANIFEST — the editable list of user apps
-components/taskmaster_core/    the OS: app framework + platform services (task-agnostic)
-  app_manager / ui / launcher  registry, the UI task, the Launcher (filters unconfigured apps)
-  app_settings                 Settings hub core app (Wi-Fi toggle + Wi-Fi setup portal)
-  wifi_mgr / softap_portal     Wi-Fi owner; captive HTTP form + DNS
-  nvs_config / app_store       schema-driven device config; per-app private storage
-  app_config                   app-declared config fields (form + Settings), core names no app
-  ui_frame / ui_list           OS frame + hint bar; generic scrollable/selectable list
-  async_job / net_status       background worker (off the UI task); connectivity API
-  lvgl_disp / sh1106 / input   LVGL on the panel; OLED driver; GPIO encoder + button decode
-  leak_test                    §6A.4 harness (CONFIG_TM_LEAK_TEST)
+components/taskmaster_core/    the OS: app framework + platform services (task-agnostic).
+                               Sources grouped by domain; each module's .c + .h sit together,
+                               every subfolder on the include path (#include by name).
+  platform/  sh1106 input      OLED driver; GPIO encoder + button decode; LVGL→panel glue;
+             lvgl_disp         board_pins.h (single source of pin truth)
+  ui/        ui launcher       the UI/render task; the Launcher (filters unconfigured apps);
+             ui_frame ui_list  OS frame + hint bar; generic scrollable/selectable list; fonts
+  app/       app_manager       app registry; async_job background worker (off the UI task); app.h
+             async_job
+  storage/   nvs_config        schema-driven device config; per-app private storage;
+             app_store app_config   app-declared config fields (form + Settings), core names no app
+  net/       wifi_mgr          Wi-Fi owner; captive HTTP provisioning form + DNS;
+             softap_portal net_status   connectivity API
+  settings/  app_settings      the Settings hub app; its schema editor + confirm dialog
+             settings_menu confirm
+  test/      leak_test         §6A.4 leak harness (CONFIG_TM_LEAK_TEST)
 apps/app_hello/                in-tree example user app (demo / leak-test canary)
 ```
 
@@ -98,7 +104,7 @@ App-author guide: [`docs/APP_API.md`](docs/APP_API.md).
 
 ## Wiring (XIAO ESP32-C3)
 
-Single source of truth: [`components/taskmaster_core/include/board_pins.h`](components/taskmaster_core/include/board_pins.h).
+Single source of truth: [`components/taskmaster_core/platform/board_pins.h`](components/taskmaster_core/platform/board_pins.h).
 
 | Signal | Pad | GPIO |
 |---|---|---|

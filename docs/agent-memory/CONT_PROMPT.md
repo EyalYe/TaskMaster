@@ -34,7 +34,7 @@ repos are pushed. **Next up is Phase 5 — BLE provisioning (NimBLE).**
   stable app API + REST contract couple them.
 - **Async cancel is cooperative** — the HTTP client handle is worker-local; cancel is a
   flag the worker polls. Never tear down a non-thread-safe handle from the UI thread
-  (that crashed; see `components/taskmaster_core/include/async_job.h`).
+  (that crashed; see `components/taskmaster_core/app/async_job.h`).
 - **Commits:** only when the user asks; branch off `main` for PRs. Core commit messages
   end with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`; app-repo commits use
   `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.

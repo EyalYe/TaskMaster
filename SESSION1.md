@@ -60,19 +60,17 @@ PLAN.md (Phase 3 = §8.5; Phase 4 = §8A.1).
 ```
 main/main.c                     composition root: NVS → Wi-Fi init → OLED → input →
                                 boot-mode branch → startup target → UI task; OTA rollback-valid
-components/taskmaster_core/
-  app_manager / ui / launcher   app registry; the single UI task (owns lifecycle + Home);
-                                Launcher (filters apps whose available() is false)
-  app_settings                  the Settings hub (schema-driven; see §6)
-  settings_menu / confirm       generic settings editor (TOGGLE/ENUM/RANGE/ACTION w/ ctx) +
-                                reusable yes/no modal
-  wifi_mgr / softap_portal      single Wi-Fi owner; captive HTTP form + DNS + SSID scan
-  nvs_config / app_store        core device config (schema table) / per-app private NVS ns
-  app_config                    app-declared config (ACFG_PASTE form fields / ACFG_KNOB Settings)
-  net_status / async_job        connectivity API / background worker (off the UI task)
-  ui_frame / ui_list            OS frame + right hint bar; generic scrollable/selectable list
-  lvgl_disp / sh1106 / input    LVGL→sh1106 framebuffer; OLED driver; GPIO encoder+button decode
-  leak_test                     §6A.4 launch→Home→relaunch harness (CONFIG_TM_LEAK_TEST)
+components/taskmaster_core/     grouped by domain; each module's .c + .h co-located,
+                                every subfolder on the include path (#include by name)
+  platform/  sh1106 input lvgl_disp   OLED driver; GPIO encoder+button decode; LVGL→panel; board_pins.h
+  ui/        ui launcher ui_frame ui_list hint_bar fonts   render task; Launcher (filters via
+                                available()); OS frame + hint bar; generic scroll/select list
+  app/       app_manager async_job    app registry (lifecycle + Home); background worker (off UI); app.h
+  storage/   nvs_config app_store app_config   device config schema / per-app NVS ns / app-declared config
+  net/       wifi_mgr softap_portal net_status   Wi-Fi owner; captive form + DNS + SSID scan; conn API
+  settings/  app_settings settings_menu confirm   Settings hub; schema editor (TOGGLE/ENUM/RANGE/ACTION
+                                w/ ctx); reusable yes/no modal
+  test/      leak_test         §6A.4 launch→Home→relaunch harness (CONFIG_TM_LEAK_TEST)
 apps/app_hello/                 in-tree demo app (also the leak/smoke-test canary; has an ACFG_KNOB "step")
 ```
 
