@@ -11,14 +11,57 @@
 #include "lvgl_disp.h"
 #include "ui_frame.h"
 #include "async_job.h"
+#include "nvs_config.h"
+#include "sh1106.h"
 
+#include "esp_timer.h"
 #include "esp_log.h"
 
 static const char *TAG = "ui";
 
+#define UI_BLANK_POLL_MS 1000   /* loop cadence while the panel is blanked (await input) */
+
 typedef enum { MODE_LAUNCHER, MODE_APP } ui_mode_t;
 
 static const device_app_t *s_initial_app;   /* boot app, NULL = Launcher */
+
+/* Inactivity blanking (§8A step 4): blank the panel after idle_to_s of no user input;
+ * the next user press wakes it (and is consumed). System events don't count as input. */
+static uint32_t s_last_input_ms;
+static bool     s_blanked;
+
+static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+static bool is_user_input(input_event_t ev)
+{
+    return ev == EV_ENCODER_CW || ev == EV_ENCODER_CCW || ev == EV_ENCODER_CLICK ||
+           ev == EV_SELECT || ev == EV_HOME;
+}
+
+static void screen_wake(void)
+{
+    if (s_blanked) {
+        sh1106_display_power(true);
+        s_blanked = false;
+    }
+}
+
+/* Blank the panel once idle_to_s (0 = off) has elapsed with no user input. */
+static void maybe_blank(void)
+{
+    if (s_blanked) {
+        return;
+    }
+    uint16_t to_s = 0;
+    config_get_u16("idle_to_s", &to_s);
+    if (to_s == 0) {
+        return;   /* timeout Off */
+    }
+    if (now_ms() - s_last_input_ms >= (uint32_t)to_s * 1000) {
+        sh1106_display_power(false);
+        s_blanked = true;
+    }
+}
 
 /* Total, idempotent teardown of any active app (§6A), then draw the Launcher. */
 static void enter_launcher(void)
@@ -68,15 +111,35 @@ static void ui_task(void *arg)
     }
 
     input_event_t ev;
+    s_last_input_ms = now_ms();
     for (;;) {
         /* Pump LVGL, then wait for an input event up to the next LVGL deadline so
-         * animations/redraws keep flowing even with no input. */
-        uint32_t next = lvgl_disp_tick();
-        if (next > UI_LVGL_MAX_IDLE_MS) next = UI_LVGL_MAX_IDLE_MS;
-        if (next < UI_LVGL_MIN_MS)      next = UI_LVGL_MIN_MS;
+         * animations/redraws keep flowing even with no input. While blanked, don't
+         * pump LVGL — just wait for the wake press (§8A). */
+        uint32_t next;
+        if (s_blanked) {
+            next = UI_BLANK_POLL_MS;
+        } else {
+            next = lvgl_disp_tick();
+            if (next > UI_LVGL_MAX_IDLE_MS) next = UI_LVGL_MAX_IDLE_MS;
+            if (next < UI_LVGL_MIN_MS)      next = UI_LVGL_MIN_MS;
+        }
 
         if (xQueueReceive(q, &ev, pdMS_TO_TICKS(next)) != pdTRUE) {
-            continue;                    /* timeout → loop and pump LVGL again */
+            maybe_blank();               /* idle → blank the panel (§8A) */
+            continue;
+        }
+
+        /* User input resets the idle timer; the first press after blanking only wakes
+         * the screen (it isn't also delivered as an action). System events (net/job)
+         * neither wake the screen nor count as activity. */
+        if (is_user_input(ev)) {
+            s_last_input_ms = now_ms();
+            if (s_blanked) {
+                screen_wake();
+                render_current(mode);
+                continue;
+            }
         }
 
         /* Home is OS-reserved (§5.2): it never reaches an app — it's the escape
@@ -92,17 +155,17 @@ static void ui_task(void *arg)
 
         /* System events (e.g. connectivity change): handled here, never delivered
          * to an app. The contract is just "your render() gets called" — apps read
-         * net_status_get() and redraw (net_status.h). */
+         * net_status_get() and redraw (net_status.h). Skip the draw while blanked. */
         if (ev == EV_SYS_NET_CHANGED) {
-            render_current(mode);
+            if (!s_blanked) render_current(mode);
             continue;
         }
 
-        /* An async_job finished: run its done() on the UI task, then re-render so
-         * the app reflects the result (async_job.h, §8.5 step 8). */
+        /* An async_job finished: run its done() on the UI task (frees ctx even when
+         * blanked), then re-render — but only if the panel is on (async_job.h). */
         if (ev == EV_SYS_JOB_DONE) {
             async_job_deliver();
-            render_current(mode);
+            if (!s_blanked) render_current(mode);
             continue;
         }
 

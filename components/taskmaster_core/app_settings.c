@@ -249,10 +249,35 @@ void app_settings_apply_brightness(void)
     bright_apply(bright_get());
 }
 
+/* ── inactivity timeout (ENUM over idle_to_s seconds; 0 = off, honored by ui.c) ── */
+static const char *const TIMEOUT_LABELS[] = { "Off", "30s", "1m", "5m", "15m" };
+static const uint16_t    TIMEOUT_SECS[]   = { 0, 30, 60, 300, 900 };
+#define TIMEOUT_COUNT ((int)(sizeof(TIMEOUT_SECS) / sizeof(TIMEOUT_SECS[0])))
+
+static int timeout_get(void)
+{
+    uint16_t s = 0;
+    config_get_u16("idle_to_s", &s);
+    for (int i = 0; i < TIMEOUT_COUNT; i++) {
+        if (TIMEOUT_SECS[i] == s) {
+            return i;
+        }
+    }
+    return 0;                            /* unknown value → Off */
+}
+
+static void timeout_set(int idx)
+{
+    if (idx < 0 || idx >= TIMEOUT_COUNT) {
+        idx = 0;
+    }
+    config_set_u16("idle_to_s", TIMEOUT_SECS[idx]);
+}
+
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
  * Indexed so a row's runtime bits (e.g. dynamic ENUM choices) can be filled in init. */
 enum {
-    SI_WIFI, SI_WIFI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT,
+    SI_WIFI, SI_WIFI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_TIMEOUT,
     SI_RESTART, SI_FACTORY, SI_COUNT
 };
 static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
@@ -267,6 +292,9 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_BRIGHT]      = { .label = "Brightness",  .kind = SETTING_RANGE,
                          .get = bright_get, .set = bright_set,
                          .min = BRIGHT_MIN, .max = BRIGHT_MAX, .step = BRIGHT_STEP, .unit = "%" },
+    [SI_TIMEOUT]     = { .label = "Timeout",     .kind = SETTING_ENUM,
+                         .get = timeout_get, .set = timeout_set,
+                         .choices = TIMEOUT_LABELS, .choice_count = TIMEOUT_COUNT },
     [SI_RESTART]     = { .label = "Restart",     .kind = SETTING_ACTION,
                          .action = act_restart,  .confirm = "Restart device?" },
     [SI_FACTORY]     = { .label = "Factory reset", .kind = SETTING_ACTION,

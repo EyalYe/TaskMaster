@@ -12,6 +12,8 @@ static const char *TAG = "sh1106";
 #define SH1106_COL_OFFSET 2          /* visible area starts at RAM column 2 */
 #define PAGES (OLED_H / 8)           /* 8 pages of 8 vertical pixels */
 #define SH1106_CMD_CONTRAST 0x81     /* set-contrast command (next byte = level) */
+#define SH1106_CMD_DISP_OFF 0xAE     /* display off (panel blank, RAM retained) */
+#define SH1106_CMD_DISP_ON  0xAF     /* display on */
 
 static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_dev;
@@ -72,6 +74,11 @@ esp_err_t sh1106_set_contrast(uint8_t contrast)
 {
     ESP_RETURN_ON_ERROR(cmd(SH1106_CMD_CONTRAST), TAG, "contrast cmd");
     return cmd(contrast);                 /* 0x00 (dim) .. 0xFF (bright) */
+}
+
+esp_err_t sh1106_display_power(bool on)
+{
+    return cmd(on ? SH1106_CMD_DISP_ON : SH1106_CMD_DISP_OFF);   /* RAM retained */
 }
 
 void sh1106_clear(void)

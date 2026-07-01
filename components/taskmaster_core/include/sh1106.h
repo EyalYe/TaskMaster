@@ -8,6 +8,7 @@
 
 #include "esp_err.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 #define OLED_W 128
 #define OLED_H 64
@@ -17,6 +18,9 @@ esp_err_t sh1106_init(void);
 
 /* Set panel brightness via the contrast register (0x00 dim … 0xFF bright). */
 esp_err_t sh1106_set_contrast(uint8_t contrast);
+
+/* Turn the panel on/off (blank on idle; RAM/image is retained, so on() restores it). */
+esp_err_t sh1106_display_power(bool on);
 
 /* Framebuffer ops (call sh1106_flush() to push to the panel). */
 void sh1106_clear(void);
