@@ -39,3 +39,7 @@ lv_obj_t *ui_text_row(int row, const char *txt);
 /* Like ui_text_row, but spans the content width and **auto-scrolls** (back/forth)
  * when the text is wider than the row — for long titles/SSIDs/URLs (§8.2). */
 lv_obj_t *ui_text_row_scroll(int row, const char *txt);
+
+/* Like ui_text_row, but **word-wraps** across the remaining rows — for a multi-line
+ * body such as a task description. Overflow past the panel is clipped. */
+lv_obj_t *ui_text_wrap(int row, const char *txt);

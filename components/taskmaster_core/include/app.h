@@ -9,6 +9,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct device_app {
     const char *name;                 /* shown in the Launcher */
@@ -16,6 +17,11 @@ typedef struct device_app {
     void (*on_event)(uint8_t ev);     /* input event (Home is OS-reserved, never delivered) */
     void (*render)(void);             /* draw current state (LVGL in a later phase) */
     void (*exit)(void);               /* teardown / free */
+    /* Optional: return false to hide this app from the Launcher until it's usable
+     * (e.g. a task source with no URL/token configured). NULL = always shown.
+     * Called from the Launcher while the app is NOT active, so read config directly
+     * (e.g. app_store) — do not assume init() has run. */
+    bool (*available)(void);
 } device_app_t;
 
 /* Implemented by taskmaster_core; called by an app's registration constructor. */

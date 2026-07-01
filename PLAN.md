@@ -716,6 +716,7 @@ The **Local** source (`~/yapplocal`) exposes a small REST contract; the device's
 Local source:
 ```
 GET  /tasks         → { "tasks":[ { id, title(≤N), priority(1-4), due, parent_id, done } ], "etag" }
+GET  /tasks/{id}    → { id, title, …, description }  → detail view (optional; 404 → no description)
 POST /tasks/{id}/complete                          → mark complete
 POST /tasks/{id}/postpone   { "due":"tomorrow" }   → reschedule (optional; 501 if unsupported)
 GET  /health                                       → liveness (shown inline by the app)
@@ -864,8 +865,19 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
     …/complete`, **optimistic remove + re-sync**); encoder *click* = Sync now; no URL → "Set URL in
     setup". `exit()` cancels an in-flight fetch (cooperative). **Verified on hardware:** device fetched
     4 tasks from the LAN server, parsed + rendered; completing tasks POSTed + re-synced (server store
-    emptied). *(Deferred polish: a detail submenu with Postpone (`POST …/postpone`, hide on 501) +
-    View-description; and "hide app when no URL" — needs launcher hide support.)*
+    emptied). Encoder *click* now opens the **detail submenu** (below), not Sync-now directly.
+    - **Detail submenu + hide-when-unconfigured (polish) — ✅ Done + verified on hardware.** Encoder
+      *click* on a task opens a `ui_list` submenu — **Details / Postpone / Sync now / Back** (shared in
+      `tasks.h`: `task_detail_t`, `task_menu_render`, `task_desc_render`); *Select* still one-tap
+      completes. **Details** shows the task's **due date** (from the cached `task_t`, no fetch) + the
+      **description** fetched **on-demand** (`GET …/tasks/{id}` → `description`, wrapped via core
+      `ui_text_wrap`; "(no description)" when empty — no per-task RAM cost). **Postpone → tomorrow**
+      (`POST …/tasks/{id}/postpone {"due":"tomorrow"}` for Local — optional, 501 = no-op; Yapp:
+      `POST …/tasks/{id} {"due_string":"tomorrow"}`, verified `ok=1 status=200`). The submenu is
+      **online-only** (its actions need the network; offline the LIST click hint shows `---`).
+      **Hide-when-unconfigured:** core `device_app_t.available()` (NULL = always shown) + the Launcher
+      filters to available apps; Local hides with no URL, Yapp hides with no token, so the Launcher only
+      lists usable apps (configure them via the provisioning form, §9.4).
 11. **Yapp app (yappcloud): fetch Todoist directly (HTTPS).** ✅ **Done.** `async_job` → `esp_http_client`
     + `esp-tls` + `esp_crt_bundle` → `GET https://api.todoist.com/api/v1/tasks` with the Bearer token
     (app config, §9.4) → parse into the same `task_t[]` → render. Complete = `POST …/tasks/{id}/close`

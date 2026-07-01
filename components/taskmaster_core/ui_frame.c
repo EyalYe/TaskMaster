@@ -121,6 +121,17 @@ lv_obj_t *ui_text_row_scroll(int row, const char *txt)
     return l;
 }
 
+lv_obj_t *ui_text_wrap(int row, const char *txt)
+{
+    lv_obj_t *l = ui_text(0, row * UI_ROW_H, txt);
+    /* Word-wrap across the remaining rows (for a multi-line body, e.g. a task
+     * description). Width = content width so LVGL breaks lines; height is left to
+     * the content so overflow is simply clipped at the panel edge. */
+    lv_obj_set_width(l, lv_obj_get_width(s_content));
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    return l;
+}
+
 void ui_frame_set_hints(const control_hints_t *h)
 {
     if (h == NULL) {
