@@ -19,10 +19,17 @@
 #include "net_status.h"
 #include "nvs_config.h"
 #include "ui_frame.h"
+#include "ui_list.h"
 #include "settings_menu.h"
 #include "confirm.h"
 #include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_netif.h"
+#include "esp_mac.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
+
+#include <stdio.h>
 
 static const char *TAG = "app.settings";
 
@@ -38,16 +45,28 @@ static const char *TAG = "app.settings";
 #define PORTAL_STEP2_ROW    3
 #define PORTAL_URL_ROW      4
 
-typedef enum { MODE_MENU, MODE_PORTAL } settings_mode_t;
+/* Device-info sub-screen. */
+#define INFO_MAX_LINES      10
+#define INFO_LINE_MAX       40   /* fits "SSID: " / "FW: " + a 32-char value; long lines scroll */
+#define INFO_SSID_MAX       33
 
-/* SEL when navigating; OK when editing a value or in a confirm dialog. */
+typedef enum { MODE_MENU, MODE_PORTAL, MODE_INFO } settings_mode_t;
+
+/* SEL when navigating; OK when editing a value or in a confirm dialog; BAK on the
+ * read-only info screen. */
 static const control_hints_t SETTINGS_HINTS      = { .rotate = "<>", .click = "SEL", .select = "SEL" };
 static const control_hints_t SETTINGS_HINTS_EDIT = { .rotate = "<>", .click = "OK",  .select = "OK" };
+static const control_hints_t SETTINGS_HINTS_INFO = { .rotate = "<>", .click = "BAK", .select = "BAK" };
 
 static settings_mode_t s_mode;
 static bool            s_portal_up;
 static bool            s_enter_setup;   /* boot asked us to open in portal mode */
 static settings_menu_t s_menu;
+
+/* Device-info snapshot (built on entry, scrolled via ui_list). */
+static char       s_info[INFO_MAX_LINES][INFO_LINE_MAX];
+static int        s_info_n;
+static ui_list_t  s_info_list;
 
 /* ── the provisioning portal sub-mode ── */
 static void portal_start(void)
@@ -94,11 +113,70 @@ static void act_wifi_setup(void)    { portal_start(); }
 static void act_restart(void)       { esp_restart(); }
 static void act_factory_reset(void) { config_factory_reset(); esp_restart(); }
 
+/* ── device / network info sub-screen ── */
+static void info_row_text(int i, char *buf, int buf_sz, void *ctx)
+{
+    (void)ctx;
+    snprintf(buf, buf_sz, "%s", (i >= 0 && i < s_info_n) ? s_info[i] : "");
+}
+
+/* Snapshot the read-only device/network info into scrollable lines. */
+static void gather_info(void)
+{
+    s_info_n = 0;
+    char (*L)[INFO_LINE_MAX] = s_info;
+
+    char ssid[INFO_SSID_MAX] = {0};
+    config_get_str("wifi_ssid", ssid, sizeof(ssid));
+    snprintf(L[s_info_n++], INFO_LINE_MAX, "SSID: %s", ssid[0] ? ssid : "-");
+
+    net_status_t ns;
+    net_status_get(&ns);
+    if (ns.online) {
+        snprintf(L[s_info_n++], INFO_LINE_MAX, "RSSI: %d dBm", ns.rssi);
+    } else {
+        snprintf(L[s_info_n++], INFO_LINE_MAX, "Net: %s", net_state_str(ns.state));
+    }
+
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip = {0};
+    if (sta && esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.ip.addr) {
+        snprintf(L[s_info_n++], INFO_LINE_MAX, "IP: " IPSTR, IP2STR(&ip.ip));
+    } else {
+        snprintf(L[s_info_n++], INFO_LINE_MAX, "IP: -");
+    }
+
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(L[s_info_n++], INFO_LINE_MAX, "MAC:%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    const esp_app_desc_t *d = esp_app_get_description();
+    snprintf(L[s_info_n++], INFO_LINE_MAX, "FW: %s", d->version);
+    snprintf(L[s_info_n++], INFO_LINE_MAX, "Built: %s", d->date);
+
+    snprintf(L[s_info_n++], INFO_LINE_MAX, "Heap: %u KB",
+             (unsigned)(esp_get_free_heap_size() / 1024));
+
+    uint32_t up_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+    snprintf(L[s_info_n++], INFO_LINE_MAX, "Up: %um %us", (unsigned)(up_s / 60),
+             (unsigned)(up_s % 60));
+}
+
+static void act_device_info(void)
+{
+    gather_info();
+    ui_list_init(&s_info_list, UI_ROWS);
+    ui_list_set_count(&s_info_list, s_info_n);
+    s_mode = MODE_INFO;
+}
+
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
  * ENUM/RANGE rows (startup / brightness / timeout) land in the following steps. */
 static const setting_item_t SETTINGS_ITEMS[] = {
     { .label = "Wi-Fi",         .kind = SETTING_TOGGLE, .get = wifi_get, .set = wifi_set },
     { .label = "Wi-Fi setup",   .kind = SETTING_ACTION, .action = act_wifi_setup },
+    { .label = "Device info",   .kind = SETTING_ACTION, .action = act_device_info },
     { .label = "Restart",       .kind = SETTING_ACTION, .action = act_restart,
       .confirm = "Restart device?" },
     { .label = "Factory reset", .kind = SETTING_ACTION, .action = act_factory_reset,
@@ -125,6 +203,16 @@ static void settings_on_event(uint8_t ev)
     if (s_mode == MODE_PORTAL) {
         return;                         /* phone drives provisioning; Home exits */
     }
+    if (s_mode == MODE_INFO) {          /* read-only: scroll, any click → back */
+        switch (ev) {
+        case EV_ENCODER_CW:  ui_list_move(&s_info_list, +1); break;
+        case EV_ENCODER_CCW: ui_list_move(&s_info_list, -1); break;
+        case EV_ENCODER_CLICK:
+        case EV_SELECT:      s_mode = MODE_MENU;             break;
+        default: break;
+        }
+        return;
+    }
     if (confirm_active()) {             /* the modal gets first refusal */
         confirm_input(ev);
         return;
@@ -140,6 +228,12 @@ static void settings_render(void)
     }
 
     lv_obj_clean(ui_frame_content());
+
+    if (s_mode == MODE_INFO) {
+        ui_frame_set_hints(&SETTINGS_HINTS_INFO);
+        ui_list_draw(&s_info_list, 0, info_row_text, NULL);
+        return;
+    }
 
     if (s_mode == MODE_PORTAL) {
         /* Instructional, phone-driven: no hint bar → full 128px width (§6). */

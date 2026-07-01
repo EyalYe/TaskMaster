@@ -40,4 +40,5 @@ idf_component_register(
         lwip
         nvs_flash
         esp_timer
+        esp_app_format   # esp_app_get_description() for the Device-info screen
 )
