@@ -79,7 +79,7 @@ void ui_frame_init(void)
     s_rotate_lbl = make_label(enc, "<>");
     lv_obj_align(s_rotate_lbl, LV_ALIGN_TOP_MID, HINT_LBL_DX, HINT_ROT_DY);
     s_rotate_img = make_glyph(enc, &glyph_scroll);
-    lv_obj_align(s_rotate_img, LV_ALIGN_TOP_MID, HINT_LBL_DX, HINT_ROT_DY);
+    lv_obj_align(s_rotate_img, LV_ALIGN_TOP_MID, HINT_LBL_DX, HINT_ROT_GLYPH_DY);
     lv_obj_t *divln = lv_obj_create(enc);
     lv_obj_remove_style_all(divln);
     lv_obj_set_size(divln, HINT_BAR_W - 2 * HINT_BOX_GAP, HINT_BOX_GAP);

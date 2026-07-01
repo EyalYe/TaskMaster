@@ -38,4 +38,5 @@ typedef struct {
 
 #define HINT_LBL_DX       1     /* per-label horizontal nudge (right) */
 #define HINT_ROT_DY       2     /* rotate label offset from cell top */
+#define HINT_ROT_GLYPH_DY 0     /* rotate glyph offset from cell top (flush) */
 #define HINT_CLICK_DY     2     /* click label offset from cell bottom (negated) */
