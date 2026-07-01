@@ -26,3 +26,14 @@
 /* --- Face buttons --- */
 #define PIN_BTN_SELECT   GPIO_NUM_5   /* D3  (app-usable) */
 #define PIN_BTN_HOME     GPIO_NUM_10  /* D10 (OS-reserved: return to Launcher) */
+
+/* --- Free for app hardware (unclaimed by core) ---
+ * A third-party app may drive its own peripherals on these pads. There is no
+ * arbitration yet (an enforced app_gpio claim/release service lands in Phase 6,
+ * §14) — it's convention: claim in init(), release in exit(), and NEVER touch a
+ * core pin above. See docs/APP_API.md §9.
+ *   D6 = GPIO21   free
+ *   D7 = GPIO20   free
+ *   D8 = GPIO8    free but STRAPPING (boot mode) — don't hold low at reset
+ *   D9 = GPIO9    free but STRAPPING — same caveat
+ * Plus the shared I2C bus (SDA/SCL above) for extra devices at other addresses. */

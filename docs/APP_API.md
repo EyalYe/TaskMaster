@@ -331,3 +331,33 @@ Rules that keep teardown safe (§6A):
   changed). The `async_job_on_cancel` hook exists only for genuinely thread-safe wakeups.
 - One job at a time (single worker): `async_job_submit` returns `NULL` if one is already running —
   skip this sync and try again later.
+
+## 9. Driving your own hardware (GPIO — convention, not yet enforced)
+
+There is **no sandbox**: your app can `#include "driver/gpio.h"` (and ADC/SPI/I²C) and call it directly
+on any pin. That means you *can* drive your own peripherals — but nothing stops you from breaking the
+device, so follow these rules. **They are convention today** (an enforced core `app_gpio` claim/release
+service arrives in Phase 6, PLAN §14); until then it's the honor system.
+
+**Pins that are yours** on the XIAO ESP32-C3 (full map in `board_pins.h`):
+
+| Pad | GPIO | Notes |
+|---|---|---|
+| **D6** | 21 | free |
+| **D7** | 20 | free |
+| **D8** | 8 | free but **strapping** (boot mode) — don't hold it low at reset |
+| **D9** | 9 | free but **strapping** — same caveat |
+
+Plus the **shared I²C bus** (SDA=GPIO6 / SCL=GPIO7) for extra I²C devices at *other* addresses.
+
+**Rules:**
+- **Never touch a core-owned pin** — OLED `GPIO6/7`, encoder `GPIO2/3/4`, Select `GPIO5`, Home `GPIO10`.
+  Driving those breaks the UI. Don't hardcode them; they live in core's `board_pins.h`.
+- **Claim in `init()`, fully release in `exit()`.** Configure your pins in `init()` and reset them
+  (`gpio_reset_pin`, remove any ISR handler) in `exit()`. **Home can fire at any moment** — a
+  left-configured pin or a dangling ISR breaks the clean-teardown guarantee (§2 / §6A).
+- **Don't spawn a task** to poll hardware (§2). Read it in `on_event`/`render`, do a one-shot in an
+  `async_job`, or register an ESP-IDF timer/ISR in `init()` and remove it in `exit()`.
+- **No arbitration yet** — two apps both grabbing D6 will conflict. The Phase-6 `app_gpio` service will
+  publish the free pins and enforce claims (rejecting core pins + double-claims); design your app to
+  claim/release so it slots in cleanly when that lands.
