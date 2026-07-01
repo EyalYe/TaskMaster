@@ -401,18 +401,23 @@ Two classes share the one `device_app_t` interface:
     also **auto-opened at boot** when the device is unprovisioned or Home is held at reset (§7A.3).
   - **Wi-Fi** — on/off master toggle: turn the radio off to save battery / stay offline (§8A).
   - **Startup behavior** — boot into Launcher (default) · a specific app · last-used app.
+  - **OLED brightness / contrast** — knob-adjustable panel brightness (SH1106 contrast), applied live.
   - **Deep sleep** — on/off master toggle (forward-looking for the battery build).
   - **Inactivity timeout** — Off · 30s · 1m · 5m · 15m before dim/sleep.
-  - **Device / network info** — read-only: IP, MAC, RSSI, SSID, firmware version, free heap, uptime.
-  - **Factory reset** — wipe NVS (creds + app data) behind a confirm, then reboot into Wi-Fi setup
-    (`config_factory_reset()`).
+  - **Device / network info** — read-only: IP, MAC, RSSI, SSID, **firmware version + build date**, free
+    heap, uptime.
+  - **Factory reset** — wipe NVS (creds + app data) behind the reusable **confirm dialog**, then reboot
+    into Wi-Fi setup (`config_factory_reset()`).
   - **Restart** — soft reboot (`esp_restart`) for recovery without unplugging.
   - **OTA update** — pull a signed image from `fw_url` (Phase 4.5; a stub/"coming soon" until then).
   - **Per-app config** — for each installed app that declared config (§9.4): its **`ACFG_KNOB`**
     scalars are knob-editable here (with bounds), and its **`ACFG_PASTE`** strings/tokens are shown
     masked with a **"re-provision"** shortcut that opens the Wi-Fi-setup form (no knob typing). Core
     names no app — these sections come from the `app_config` registry.
-  - (Room to grow: brightness, sync interval — same settings-schema pattern.)
+  - **Built schema-driven (§8A.1 step 0):** every knob-editable item above is a row in a declarative
+    settings table rendered by **one** generic editor; core rows and per-app `ACFG_KNOB` rows share it,
+    so adding a setting is a row, not a screen, and core hardcodes no app. (Room to grow: sync interval
+    is **not** here — it's app-owned, §8A.1.)
   Behavior settings persist to NVS immediately on change (§9). **Boundary:** Settings owns
   network/device/system + the *editing surface* for app-declared config (§9.4); the app config's
   *meaning* (and the task sources themselves) live in the app repos (§11.2).
@@ -995,6 +1000,52 @@ rearchitecting**. Values live in NVS, edited in the **Settings app** (§6), not 
 - **Implementation hook:** ESP-IDF **power management** (`esp_pm`, DFS + automatic light sleep) so
   idle→low-power transitions are kernel-managed, keeping the path clean for real duty-cycling later.
 
+### 8A.1 Phase 4 — build order (Settings hub build-out + power)
+
+**Theme:** finish the Settings hub as a **schema-driven** menu and land the power/idle scaffolding.
+Core stays app-agnostic — the *same* editor renders core settings and each app's declared `ACFG_KNOB`
+(§9.4), so core never hardcodes an app. (Foundation already done, brought forward: the Settings app
+shell, Wi-Fi on/off, Wi-Fi setup, boot-to-setup, hide-when-unconfigured; the NVS keys `startup_tgt` /
+`deep_sleep` / `idle_to_s` / `fw_url` and `config_factory_reset()` already exist — Phase 4 is mostly
+wiring UI + behavior onto them.)
+
+0. **Generic settings editor + confirm dialog (core primitives) — the high-leverage foundation.** A
+   declarative row model — `{ label, kind (TOGGLE / ENUM / RANGE / ACTION), an NVS key or a
+   getter/setter, and choices | min/max/step } ` — plus one `ui_list`-based editor: rotate picks a row,
+   Select enters edit, rotate changes the value (cycle enum / bump number / flip toggle), persisted on
+   change. Core device settings are declared as these rows; per-app `ACFG_KNOB` fields become rows the
+   **same** editor renders (§9.4). Plus a reusable **confirm dialog** ("Are you sure? Yes/No") for
+   destructive actions. *(Decided: schema-driven over bespoke per-screen — it matches the existing
+   declarative `nvs_config` / `app_config` tables and makes per-app knobs fall out for free.)*
+1. **Quick wins.** **Device / network info** (read-only: IP, MAC, RSSI, SSID, **firmware version +
+   build date**, free heap, uptime); **Restart** (`esp_restart`); **Factory reset**
+   (`config_factory_reset()` behind the confirm dialog → reboot into Wi-Fi setup).
+2. **Startup behavior** (Launcher / a specific app / last-used) — a schema ENUM over `startup_tgt`,
+   honored at boot by `app_manager` (unprovisioned still overrides → Wi-Fi setup, §7A.3).
+3. **OLED brightness / contrast** — a schema RANGE driving the SH1106 contrast register; applied live +
+   persisted. *(Added to Settings per decision.)*
+4. **Inactivity timeout** (Off / 30s / 1m / 5m / 15m — schema ENUM over `idle_to_s`) + the idle timer:
+   **Stage 1** blank/dim the OLED + pause the render loop; any input restores instantly.
+5. **Deep-sleep toggle + light sleep.** First convert input from the **1 ms poll → interrupt /
+   GPIO-wake** (the one foundational change, §4.6 deferral), then **Stage 2**: `esp_light_sleep` /
+   `esp_pm` with encoder + Select/Home as wake sources. Labelled "deep sleep," light sleep under the
+   hood first (§8A).
+6. **Per-app config in Settings** — the editor iterates the `app_config` groups (§9.4): `ACFG_KNOB`
+   scalars knob-editable, `ACFG_PASTE` strings shown masked with a **re-provision** shortcut that opens
+   the form. Falls out of step 0.
+7. **OTA update (Phase 4.5).** Stub / "coming soon" until then; the real path pulls a signed image from
+   `fw_url` via `esp_https_ota` with rollback (§9).
+
+**Decisions / out of scope (this phase):**
+- **Sync interval is app-owned, not a core setting** (core⟂app, §11.2). An app either **hardcodes** it
+  or **declares it as an `ACFG_KNOB`** (rendered by the shared editor, stored in the app's own
+  namespace — the §9.4 `sync_min` example). If periodic sync is wanted, core exposes a generic **tick
+  event** apps *may* consume; the interval value stays app-side and core adds no sync knob. *(Task apps
+  today sync on entry + on demand; no periodic poll exists yet.)*
+- **Encoder long-press / acceleration** stays **out of core navigation** (keeps nav simple). Core may
+  deliver an optional **long-press event** that apps can opt into for their own gestures.
+- **NTP time + status bar** (time / weather, §6C) — deferred, not this phase.
+
 ---
 
 ## 9. Storage, Flash Layout & OTA
@@ -1230,8 +1281,8 @@ headers, §6) and the **device REST contract** (§8.1).
 | **0 — Bring-up + spike** ✅ | ESP-IDF build, partition table, per-driver tests **+ SoftAP/HTTP spike** | App boots; OLED draws; encoder/buttons emit `EV_*`; **a phone loads a page served by the device over SoftAP** |
 | **1 — Core OS** ✅ | Refactor bring-up into the **`taskmaster_core` component** + manifest-driven **app components** (§6.1); **UI task + stub `task_model_t`/mutex skeleton** (§5.2, network stubbed); app_manager lifecycle (`switch_to`) + Home wiring; **raw-rendered Launcher** (LVGL deferred, §4.4) | A demo app component self-registers via `idf_component.yml` and shows in the Launcher; commenting its manifest line removes it (not compiled); encoder navigates; app switch is clean (no races); Home returns from any app; leak-clean teardown cycle (§6A.4) passes |
 | **2 — Provisioning portal** ✅ | **Setup/Wi-Fi core app** (non-removable, §6): paste-from-phone form → NVS, schema-driven (§9.2); STA connect + boot-mode branch on `provisioned`; **stand up the §6A.4 debug-build leak harness** (carried over from Phase 1) | Setup app auto-launches when unprovisioned and is reachable from the Launcher; join `TaskMaster-Setup`, paste full config in one form, persist to NVS, associate, survive reboot; **the launch→Home→relaunch leak-clean cycle (§6A.4) passes on a heap-poisoning debug build** |
-| **3 — UI foundation + userspace tasks** ◀ next | LVGL UI foundation (done, Part A); then **tasks in userspace** (§8): core gains generic `ui_list` + `async_job`, **task model/sync purged from core**; the **Yapp app pulls Todoist directly** (no proxy) + the **Local app** over its LAN contract; offline honors `WIFI_EN` | LVGL is the UI foundation (ported, leak-clean); **core is task-free**; both source apps show priority-sorted, nested tasks via the generic list; complete/postpone work; **Wi-Fi-off shows cached tasks + OFFLINE**; each app passes the §6A.4 leak gate |
-| **4 — Settings + power** | Build the **Settings hub** (§6) — absorbs Wi-Fi setup as a menu item (removes the interim standalone Setup app, §7A.4) + device info / factory reset / restart / OTA-stub; idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓) | Settings menu navigates; Wi-Fi setup opens the portal and boot auto-opens it when unprovisioned; startup target, deep-sleep toggle, timeout persist and take effect; screen blanks on idle; **system reaches light sleep when idle** |
+| **3 — UI foundation + userspace tasks** ✅ | LVGL UI foundation (done, Part A); then **tasks in userspace** (§8): core gains generic `ui_list` + `async_job`, **task model/sync purged from core**; the **Yapp app pulls Todoist directly** (no proxy) + the **Local app** over its LAN contract; offline honors `WIFI_EN` | **Done + verified on hardware:** core is task-free; both source apps show priority-sorted, nested tasks via the generic list; complete + postpone + on-demand description (detail submenu) work; **Wi-Fi-off shows cached tasks + OFFLINE**, writes queue + replay on reconnect; apps hide until configured; §6A.4 leak gate passes on all 4 apps; the Home-mid-fetch cancel crash was found + fixed |
+| **4 — Settings + power** ◀ next | Finish the **Settings hub** (§6) as a **schema-driven** menu (§8A.1): a generic knob-editor + confirm dialog (step 0), then device info (incl. **fw version/build date**) / restart / factory reset, startup target, **brightness**, timeout, deep-sleep; per-app `ACFG_KNOB` via the same editor; OTA-stub. Idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓). *(Sync interval is app-owned, not here; long-press stays out of core nav.)* | Settings menu navigates; one editor drives every knob (core + per-app); startup target, brightness, deep-sleep toggle, timeout persist and take effect; factory reset/restart work behind a confirm; screen blanks on idle; **system reaches light sleep when idle** |
 | **4.5 — OTA path** | `esp_https_ota` + rollback | Device pulls a signed image from `fw_url`, boots the new slot, rolls back on failed confirm |
 | **5 — Hardening + post-MVP** | Soak, error states, enclosure; then BLE provisioning / direct Todoist / Pomodoro | 24h soak clean; graceful Wi-Fi-loss + API-error UI; fits enclosure; post-MVP items as separate increments |
 | **6 — App-ecosystem hardening** *(when a real third-party ecosystem materializes)* | Make the app platform safe to host untrusted apps: **per-app NVS budget enforcement** + `nvs` partition sizing (§9.3); namespace-**collision hardening** beyond docs; broader app sandboxing as needed | Apps can't exhaust NVS or crowd out core/provisioning; collisions detected, not just documented |
