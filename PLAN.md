@@ -1009,17 +1009,19 @@ shell, Wi-Fi on/off, Wi-Fi setup, boot-to-setup, hide-when-unconfigured; the NVS
 `deep_sleep` / `idle_to_s` / `fw_url` and `config_factory_reset()` already exist — Phase 4 is mostly
 wiring UI + behavior onto them.)
 
-0. **Generic settings editor + confirm dialog (core primitives) — the high-leverage foundation.** A
-   declarative row model — `{ label, kind (TOGGLE / ENUM / RANGE / ACTION), an NVS key or a
-   getter/setter, and choices | min/max/step } ` — plus one `ui_list`-based editor: rotate picks a row,
-   Select enters edit, rotate changes the value (cycle enum / bump number / flip toggle), persisted on
-   change. Core device settings are declared as these rows; per-app `ACFG_KNOB` fields become rows the
-   **same** editor renders (§9.4). Plus a reusable **confirm dialog** ("Are you sure? Yes/No") for
-   destructive actions. *(Decided: schema-driven over bespoke per-screen — it matches the existing
-   declarative `nvs_config` / `app_config` tables and makes per-app knobs fall out for free.)*
-1. **Quick wins.** **Device / network info** (read-only: IP, MAC, RSSI, SSID, **firmware version +
-   build date**, free heap, uptime); **Restart** (`esp_restart`); **Factory reset**
-   (`config_factory_reset()` behind the confirm dialog → reboot into Wi-Fi setup).
+0. **Generic settings editor + confirm dialog (core primitives) — ✅ Done + verified on hardware.**
+   `settings_menu.[ch]`: a declarative row model — `{ label, kind (TOGGLE / ENUM / RANGE / ACTION),
+   get()/set() accessors, choices | min/max/step, action + optional confirm } ` — plus one
+   `ui_list`-based editor: rotate picks a row, Select enters edit, rotate changes the value (cycle enum
+   / bump number / flip toggle) applied live via `set()`, ACTION invokes (behind confirm). Core settings
+   are declared as rows; per-app `ACFG_KNOB` will reuse the same editor (§9.4), so core names no app.
+   `confirm.[ch]`: a reusable modal yes/no dialog (state cleared before the callback so a rebooting
+   action can't re-enter a live modal). `app_settings` rewritten onto both. *(Schema-driven over bespoke
+   per-screen — matches the declarative `nvs_config` / `app_config` tables.)* **Verified:** Wi-Fi TOGGLE
+   flips in place; Restart + Factory reset run behind the confirm dialog.
+1. **Quick wins.** **Restart** (`esp_restart`) + **Factory reset** (`config_factory_reset()` behind the
+   confirm dialog → reboot into Wi-Fi setup) — ✅ done (landed with step 0). **Remaining: Device /
+   network info** (read-only: IP, MAC, RSSI, SSID, **firmware version + build date**, free heap, uptime).
 2. **Startup behavior** (Launcher / a specific app / last-used) — a schema ENUM over `startup_tgt`,
    honored at boot by `app_manager` (unprovisioned still overrides → Wi-Fi setup, §7A.3).
 3. **OLED brightness / contrast** — a schema RANGE driving the SH1106 contrast register; applied live +
