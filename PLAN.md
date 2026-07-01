@@ -1028,8 +1028,10 @@ wiring UI + behavior onto them.)
    *(Deferred: a "last used" choice — needs last-app persistence.)*
 3. **OLED brightness / contrast. ✅ Done.** A schema **RANGE** (10–100%, step 10) → `sh1106_set_contrast`
    (new core key `bright`); applied live + restored at boot (`app_settings_apply_brightness`).
-4. **Inactivity timeout** (Off / 30s / 1m / 5m / 15m — schema ENUM over `idle_to_s`) + the idle timer:
-   **Stage 1** blank/dim the OLED + pause the render loop; any input restores instantly.
+4. **Inactivity timeout. ✅ Done.** A schema **ENUM** over `idle_to_s` (Off / 30s / 1m / 5m / 15m). The
+   UI task tracks last user-input time and after the timeout **blanks the panel** (`sh1106_display_power`
+   off, RAM retained) + stops pumping LVGL; the next **user** press wakes it (consumed). System events
+   (net/job) don't wake or reset idle, and job-done still delivers while blanked. (Stage 2 = step 5.)
 5. **Deep-sleep toggle + light sleep.** First convert input from the **1 ms poll → interrupt /
    GPIO-wake** (the one foundational change, §4.6 deferral), then **Stage 2**: `esp_light_sleep` /
    `esp_pm` with encoder + Select/Home as wake sources. Labelled "deep sleep," light sleep under the
