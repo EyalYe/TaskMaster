@@ -13,17 +13,17 @@ static void fmt_value(const setting_item_t *it, char *buf, int sz)
 {
     switch (it->kind) {
     case SETTING_TOGGLE:
-        snprintf(buf, sz, "%s", (it->get && it->get()) ? "On" : "Off");
+        snprintf(buf, sz, "%s", (it->get && it->get(it->ctx)) ? "On" : "Off");
         break;
     case SETTING_ENUM: {
-        int v = it->get ? it->get() : 0;
+        int v = it->get ? it->get(it->ctx) : 0;
         if (v < 0)                 v = 0;
         if (v >= it->choice_count) v = it->choice_count - 1;
         snprintf(buf, sz, "%s", (it->choices && v >= 0) ? it->choices[v] : "?");
         break;
     }
     case SETTING_RANGE:
-        snprintf(buf, sz, "%d%s", it->get ? it->get() : 0, it->unit ? it->unit : "");
+        snprintf(buf, sz, "%d%s", it->get ? it->get(it->ctx) : 0, it->unit ? it->unit : "");
         break;
     default:
         buf[0] = '\0';
@@ -56,7 +56,7 @@ static void adjust(const setting_item_t *e, int dir)
     if (!e->get || !e->set) {
         return;
     }
-    int v = e->get();
+    int v = e->get(e->ctx);
     if (e->kind == SETTING_ENUM) {
         int n = e->choice_count > 0 ? e->choice_count : 1;
         v = ((v + dir) % n + n) % n;            /* wrap both ways */
@@ -65,14 +65,14 @@ static void adjust(const setting_item_t *e, int dir)
         if (v < e->min) v = e->min;
         if (v > e->max) v = e->max;
     }
-    e->set(v);
+    e->set(e->ctx, v);
 }
 
 static void confirm_cb(bool yes, void *ctx)
 {
     const setting_item_t *it = (const setting_item_t *)ctx;
     if (yes && it->action) {
-        it->action();
+        it->action(it->ctx);
     }
 }
 
@@ -82,7 +82,7 @@ static void activate(settings_menu_t *m)
     switch (it->kind) {
     case SETTING_TOGGLE:
         if (it->get && it->set) {
-            it->set(it->get() ? 0 : 1);
+            it->set(it->ctx, it->get(it->ctx) ? 0 : 1);
         }
         break;
     case SETTING_ENUM:
@@ -93,7 +93,7 @@ static void activate(settings_menu_t *m)
         if (it->confirm) {
             confirm_open(it->confirm, confirm_cb, (void *)it);
         } else if (it->action) {
-            it->action();
+            it->action(it->ctx);
         }
         break;
     }

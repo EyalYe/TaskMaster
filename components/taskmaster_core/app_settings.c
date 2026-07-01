@@ -19,6 +19,8 @@
 #include "net_status.h"
 #include "nvs_config.h"
 #include "app_manager.h"
+#include "app_config.h"
+#include "app_store.h"
 #include "sh1106.h"
 #include "ui_frame.h"
 #include "ui_list.h"
@@ -92,8 +94,9 @@ static void portal_stop(void)
 }
 
 /* ── settings-table accessors / actions ── */
-static int wifi_get(void)
+static int wifi_get(void *ctx)
 {
+    (void)ctx;
     uint8_t en = 1;                     /* default on if never set */
     config_get_u8("wifi_en", &en);
     return en != 0 ? 1 : 0;
@@ -101,8 +104,9 @@ static int wifi_get(void)
 
 /* Flip the Wi-Fi master switch: persist WIFI_EN + drive the radio. This is what takes
  * the device (and the task apps) offline/online (§8.3, step 12). */
-static void wifi_set(int on)
+static void wifi_set(void *ctx, int on)
 {
+    (void)ctx;
     config_set_u8("wifi_en", on ? 1 : 0);
     if (on) {
         wifi_mgr_start_sta();           /* CONNECTING → CONNECTED */
@@ -112,9 +116,9 @@ static void wifi_set(int on)
     ESP_LOGI(TAG, "Wi-Fi %s", on ? "on" : "off");
 }
 
-static void act_wifi_setup(void)    { portal_start(); }
-static void act_restart(void)       { esp_restart(); }
-static void act_factory_reset(void) { config_factory_reset(); esp_restart(); }
+static void act_wifi_setup(void *ctx)    { (void)ctx; portal_start(); }
+static void act_restart(void *ctx)       { (void)ctx; esp_restart(); }
+static void act_factory_reset(void *ctx) { (void)ctx; config_factory_reset(); esp_restart(); }
 
 /* ── device / network info sub-screen ── */
 static void info_row_text(int i, char *buf, int buf_sz, void *ctx)
@@ -166,8 +170,9 @@ static void gather_info(void)
              (unsigned)(up_s % 60));
 }
 
-static void act_device_info(void)
+static void act_device_info(void *ctx)
 {
+    (void)ctx;
     gather_info();
     ui_list_init(&s_info_list, UI_ROWS);
     ui_list_set_count(&s_info_list, s_info_n);
@@ -196,8 +201,9 @@ static void startup_build_choices(void)
     }
 }
 
-static int startup_get(void)
+static int startup_get(void *ctx)
 {
+    (void)ctx;
     char t[STARTUP_TGT_MAX] = {0};
     config_get_str("startup_tgt", t, sizeof(t));
     if (t[0] == '\0') {
@@ -211,8 +217,9 @@ static int startup_get(void)
     return 0;                                /* stale target → Launcher */
 }
 
-static void startup_set(int idx)
+static void startup_set(void *ctx, int idx)
 {
+    (void)ctx;
     config_set_str("startup_tgt",
                    (idx > 0 && idx < s_startup_count) ? s_startup_choices[idx] : "");
 }
@@ -230,15 +237,17 @@ static void bright_apply(int pct)
     sh1106_set_contrast((uint8_t)(pct * BRIGHT_FULL / 100));
 }
 
-static int bright_get(void)
+static int bright_get(void *ctx)
 {
+    (void)ctx;
     uint8_t p = BRIGHT_MAX;
     config_get_u8("bright", &p);
     return p;
 }
 
-static void bright_set(int pct)
+static void bright_set(void *ctx, int pct)
 {
+    (void)ctx;
     config_set_u8("bright", (uint8_t)pct);
     bright_apply(pct);                  /* live */
 }
@@ -246,7 +255,7 @@ static void bright_set(int pct)
 /* Apply the saved brightness at boot (called from main after the panel is up). */
 void app_settings_apply_brightness(void)
 {
-    bright_apply(bright_get());
+    bright_apply(bright_get(NULL));
 }
 
 /* ── inactivity timeout (ENUM over idle_to_s seconds; 0 = off, honored by ui.c) ── */
@@ -254,8 +263,9 @@ static const char *const TIMEOUT_LABELS[] = { "Off", "30s", "1m", "5m", "15m" };
 static const uint16_t    TIMEOUT_SECS[]   = { 0, 30, 60, 300, 900 };
 #define TIMEOUT_COUNT ((int)(sizeof(TIMEOUT_SECS) / sizeof(TIMEOUT_SECS[0])))
 
-static int timeout_get(void)
+static int timeout_get(void *ctx)
 {
+    (void)ctx;
     uint16_t s = 0;
     config_get_u16("idle_to_s", &s);
     for (int i = 0; i < TIMEOUT_COUNT; i++) {
@@ -266,8 +276,9 @@ static int timeout_get(void)
     return 0;                            /* unknown value → Off */
 }
 
-static void timeout_set(int idx)
+static void timeout_set(void *ctx, int idx)
 {
+    (void)ctx;
     if (idx < 0 || idx >= TIMEOUT_COUNT) {
         idx = 0;
     }
@@ -275,16 +286,44 @@ static void timeout_set(int idx)
 }
 
 /* ── deep sleep (TOGGLE): when on, idle → light sleep (Stage 2, ui.c) ── */
-static int deep_sleep_get(void)
+static int deep_sleep_get(void *ctx)
 {
+    (void)ctx;
     uint8_t v = 0;
     config_get_u8("deep_sleep", &v);
     return v != 0 ? 1 : 0;
 }
 
-static void deep_sleep_set(int on)
+static void deep_sleep_set(void *ctx, int on)
 {
+    (void)ctx;
     config_set_u8("deep_sleep", on ? 1 : 0);
+}
+
+/* ── per-app ACFG_KNOB rows (§9.4): each carries its {ns, field}; values live in the
+ * app's own app_store namespace, so core edits app config without naming any app. ── */
+typedef struct { const char *ns; const app_cfg_field_t *f; } app_knob_ctx_t;
+
+static int app_knob_get(void *ctx)
+{
+    app_knob_ctx_t *c = (app_knob_ctx_t *)ctx;
+    app_store_t st;
+    uint32_t v = (uint32_t)c->f->min;   /* default to the field's min */
+    if (app_store_open(&st, c->ns) == ESP_OK) {
+        app_store_get_u32(&st, c->f->key, &v, (uint32_t)c->f->min);
+        app_store_close(&st);
+    }
+    return (int)v;
+}
+
+static void app_knob_set(void *ctx, int val)
+{
+    app_knob_ctx_t *c = (app_knob_ctx_t *)ctx;
+    app_store_t st;
+    if (app_store_open(&st, c->ns) == ESP_OK) {
+        app_store_set_u32(&st, c->f->key, (uint32_t)val);
+        app_store_close(&st);
+    }
 }
 
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
@@ -315,7 +354,49 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_FACTORY]     = { .label = "Factory reset", .kind = SETTING_ACTION,
                          .action = act_factory_reset, .confirm = "Erase all settings?" },
 };
-#define SETTINGS_ITEM_COUNT SI_COUNT
+/* Live rows = the core template above + one appended row per app ACFG_KNOB field. */
+#define MAX_APP_KNOBS     16
+#define SETTINGS_MAX_ROWS (SI_COUNT + MAX_APP_KNOBS)
+
+static setting_item_t s_rows[SETTINGS_MAX_ROWS];
+static int            s_row_count;
+static app_knob_ctx_t s_knob_ctx[MAX_APP_KNOBS];
+
+/* Build the live rows: copy the core template, wire the dynamic startup choices, then
+ * append each installed app's ACFG_KNOB fields (§9.4) — core names no app. */
+static void settings_build_rows(void)
+{
+    memcpy(s_rows, SETTINGS_ITEMS, sizeof(SETTINGS_ITEMS));
+    s_row_count = SI_COUNT;
+    s_rows[SI_STARTUP].choices      = s_startup_choices;
+    s_rows[SI_STARTUP].choice_count = s_startup_count;
+
+    int kc = 0;
+    for (unsigned g = 0; g < app_config_group_count() && s_row_count < SETTINGS_MAX_ROWS; g++) {
+        const app_cfg_group_t *grp = app_config_group(g);
+        for (unsigned k = 0; k < grp->count && s_row_count < SETTINGS_MAX_ROWS && kc < MAX_APP_KNOBS; k++) {
+            const app_cfg_field_t *f = &grp->fields[k];
+            if (f->input != ACFG_KNOB) {
+                continue;               /* ACFG_PASTE is set via the form / Wi-Fi setup */
+            }
+            s_knob_ctx[kc] = (app_knob_ctx_t){ .ns = grp->ns, .f = f };
+            setting_item_t *row = &s_rows[s_row_count++];
+            memset(row, 0, sizeof(*row));
+            row->label = f->label;
+            row->get   = app_knob_get;
+            row->set   = app_knob_set;
+            row->ctx   = &s_knob_ctx[kc++];
+            if (f->type == ACFG_BOOL) {
+                row->kind = SETTING_TOGGLE;
+            } else {
+                row->kind = SETTING_RANGE;
+                row->min  = (int)f->min;
+                row->max  = (int)f->max;
+                row->step = 1;
+            }
+        }
+    }
+}
 
 /* ── app lifecycle ── */
 static void settings_init(void)
@@ -323,9 +404,8 @@ static void settings_init(void)
     s_portal_up = false;
     confirm_reset();                    /* never inherit a stale modal */
     startup_build_choices();            /* dynamic ENUM choices from the app registry */
-    SETTINGS_ITEMS[SI_STARTUP].choices      = s_startup_choices;
-    SETTINGS_ITEMS[SI_STARTUP].choice_count = s_startup_count;
-    settings_menu_init(&s_menu, SETTINGS_ITEMS, SETTINGS_ITEM_COUNT, SETTINGS_LIST_ROWS);
+    settings_build_rows();
+    settings_menu_init(&s_menu, s_rows, s_row_count, SETTINGS_LIST_ROWS);
     if (s_enter_setup) {
         s_enter_setup = false;
         portal_start();                 /* boot provisioning → straight into the portal */

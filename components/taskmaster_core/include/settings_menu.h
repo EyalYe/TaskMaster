@@ -30,9 +30,10 @@ typedef enum {
 typedef struct setting_item {
     const char        *label;
     setting_kind_t     kind;
-    /* value accessors (TOGGLE / ENUM / RANGE) */
-    int   (*get)(void);
-    void  (*set)(int value);
+    /* value accessors (TOGGLE / ENUM / RANGE). `ctx` is this row's opaque context
+     * (NULL for core rows; per-app rows point it at their {ns,key}). */
+    int   (*get)(void *ctx);
+    void  (*set)(void *ctx, int value);
     /* ENUM */
     const char *const *choices;
     int                choice_count;
@@ -42,8 +43,9 @@ typedef struct setting_item {
     int                step;
     const char        *unit;      /* optional value suffix, e.g. "%" (NULL = none) */
     /* ACTION */
-    void  (*action)(void);
+    void  (*action)(void *ctx);
     const char        *confirm;   /* NULL = act immediately; else confirm-dialog prompt */
+    void              *ctx;       /* passed to get/set/action */
 } setting_item_t;
 
 typedef struct {

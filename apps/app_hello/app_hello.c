@@ -22,8 +22,13 @@ static const control_hints_t HELLO_HINTS = { .rotate = "+/-", .click = "RST", .s
 /* Declared config (§9.4): a paste-only "name" the provisioning form will collect
  * into this app's app_store namespace ("hello"). Proves the facility end to end. */
 #define HELLO_NAME_MAX 24
+#define HELLO_STEP_MIN  1
+#define HELLO_STEP_MAX 10
 static const app_cfg_field_t HELLO_CFG[] = {
     { .key = "name", .label = "Your name", .type = ACFG_STR, .input = ACFG_PASTE, .max_len = HELLO_NAME_MAX },
+    /* A knob-editable scalar (§9.4): the counter step, adjustable in Settings. */
+    { .key = "step", .label = "Hello step", .type = ACFG_U8, .input = ACFG_KNOB,
+      .min = HELLO_STEP_MIN, .max = HELLO_STEP_MAX },
 };
 TASKMASTER_REGISTER_APP_CONFIG("hello", "Hello", HELLO_CFG);
 
@@ -37,6 +42,7 @@ TASKMASTER_REGISTER_APP_CONFIG("hello", "Hello", HELLO_CFG);
 
 static const char *TAG = "app.hello";
 static int          s_counter;
+static int          s_step;    /* per-detent increment, knob-set in Settings (§9.4) */
 static app_store_t  s_store;   /* this app's own private NVS namespace */
 
 static void hello_init(void)
@@ -47,14 +53,17 @@ static void hello_init(void)
     uint32_t saved = 0;
     app_store_get_u32(&s_store, "count", &saved, 0);   /* default 0 on first run */
     s_counter = (int)saved;
-    ESP_LOGI(TAG, "init (restored count=%d)", s_counter);
+    uint32_t step = HELLO_STEP_MIN;
+    app_store_get_u32(&s_store, "step", &step, HELLO_STEP_MIN);   /* Settings knob */
+    s_step = (int)step;
+    ESP_LOGI(TAG, "init (restored count=%d, step=%d)", s_counter, s_step);
 }
 
 static void hello_on_event(uint8_t ev)
 {
     switch (ev) {
-    case EV_ENCODER_CW:  s_counter++; break;
-    case EV_ENCODER_CCW: s_counter--; break;
+    case EV_ENCODER_CW:  s_counter += s_step; break;
+    case EV_ENCODER_CCW: s_counter -= s_step; break;
     case EV_ENCODER_CLICK:
     case EV_SELECT:      s_counter = 0; break;   /* push / Select resets */
     default: break;
