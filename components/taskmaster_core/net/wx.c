@@ -45,6 +45,7 @@ static int    s_offset;              /* utc_offset_seconds (read by UI) */
 static int    s_temp;                /* °C, rounded (read by UI) */
 static int    s_code;                /* WMO weather code (read by UI) */
 static bool   s_have_wx;             /* a forecast has been fetched (read by UI) */
+static TaskHandle_t s_task;          /* the fetch task (for wx_refresh wakeups) */
 
 /* Minimal percent-encode for a query value (city names have spaces/accents). */
 static void url_encode(const char *in, char *out, size_t out_len)
@@ -194,7 +195,9 @@ static void wx_task(void *arg)
                 wait_ms = WX_REFRESH_MS;               /* success → long refresh */
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(wait_ms));
+        /* Sleep until the next poll — but wake early if wx_refresh() pokes us
+         * (e.g. the city was just changed via the config page). */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
     }
 }
 
@@ -207,7 +210,12 @@ void wx_init(void)
     esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, WX_NTP_SERVER);
     esp_sntp_init();
-    xTaskCreate(wx_task, "wx", WX_TASK_STACK, NULL, WX_TASK_PRIO, NULL);
+    xTaskCreate(wx_task, "wx", WX_TASK_STACK, NULL, WX_TASK_PRIO, &s_task);
+}
+
+void wx_refresh(void)
+{
+    if (s_task) xTaskNotifyGive(s_task);   /* wake the fetch task now (e.g. city changed) */
 }
 
 bool wx_time_str(char *out, size_t out_len)

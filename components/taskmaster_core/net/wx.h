@@ -16,6 +16,9 @@
 /* Start NTP + the fetch task. Call once at boot (after config + Wi-Fi init). */
 void wx_init(void);
 
+/* Wake the fetch task to re-check the city + refresh now (e.g. after a config edit). */
+void wx_refresh(void);
+
 /* "HH:MM" local time into `out`. False until NTP is synced AND an offset is known. */
 bool wx_time_str(char *out, size_t out_len);
 

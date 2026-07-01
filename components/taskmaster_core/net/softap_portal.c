@@ -3,6 +3,7 @@
 #include "app_config.h"
 #include "app_store.h"
 #include "wifi_mgr.h"
+#include "wx.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -27,12 +28,32 @@ static httpd_handle_t   s_server;
 static TaskHandle_t     s_dns_task;
 static volatile bool    s_dns_run;
 
+/* The form HTTP server is wanted by either the SoftAP setup portal (s_ap_up, with
+ * captive DNS) OR the LAN config page (s_lan_web, on the station IP). One httpd on
+ * :80 serves both — sync_httpd() starts/stops it from these two wants. */
+static bool s_ap_up;
+static bool s_lan_web;
+static bool s_httpd_up;
+
 /* --- Setup form: core (Wi-Fi/OTA) section + one section per installed app's
  * ACFG_PASTE fields (PLAN §7A.5/§9.4). Core fields are named by their NVS key;
  * app fields are named "cfg.<ns>.<key>" so POST /save routes them to app_store.
  * Secrets become password fields; the SSID field gets a /scan datalist. Served
  * for ANY path so captive probes land on it. --- */
 static const char *INPUT_STYLE = "style=\"width:100%;box-sizing:border-box\"";
+
+/* Escape a value for an HTML attribute (" & <). */
+static void html_attr(const char *in, char *out, size_t out_len)
+{
+    size_t o = 0;
+    for (const char *p = in; *p && o + 7 < out_len; p++) {
+        if (*p == '"')      { memcpy(out + o, "&quot;", 6); o += 6; }
+        else if (*p == '&') { memcpy(out + o, "&amp;",  5); o += 5; }
+        else if (*p == '<') { memcpy(out + o, "&lt;",   4); o += 4; }
+        else                { out[o++] = *p; }
+    }
+    out[o] = '\0';
+}
 
 static esp_err_t form_get(httpd_req_t *req)
 {
@@ -41,12 +62,14 @@ static esp_err_t form_get(httpd_req_t *req)
         "<!doctype html><html><head><meta name=viewport "
         "content=\"width=device-width,initial-scale=1\"><title>TaskMaster-C3 Setup</title></head>"
         "<body style=\"font-family:sans-serif;max-width:30em;margin:1.5em auto;padding:0 1em\">"
-        "<h1>TaskMaster-C3</h1><p>Paste your config, then Save.</p>"
+        "<h1>TaskMaster-C3</h1><p>Edit config, then Save. Blank secrets keep their value.</p>"
         "<form method=post action=/save>");
 
-    char row[256];
+    char row[512];
+    char esc[256];
 
-    /* Core section: Wi-Fi + OTA (the only provisioning-path fields in nvs_config). */
+    /* Core section: Wi-Fi + OTA (the only provisioning-path fields in nvs_config).
+     * Non-secret fields are pre-filled with the current value; secrets stay blank. */
     for (unsigned i = 0; i < config_field_count(); i++) {
         const cfg_field_t *f = config_field(i);
         if (f->write_path != CFG_WP_PROVISION) {
@@ -55,9 +78,16 @@ static esp_err_t form_get(httpd_req_t *req)
         const char *type = f->secret ? "password" : "text";
         bool is_ssid = (strcmp(f->key, "wifi_ssid") == 0);
         const char *extra = is_ssid ? " list=aps id=ssid" : "";
+        esc[0] = '\0';
+        if (!f->secret) {
+            char cur[128] = {0};
+            config_get_str(f->key, cur, sizeof(cur));
+            html_attr(cur, esc, sizeof(esc));
+        }
         snprintf(row, sizeof(row),
-            "<label>%s<br><input name=%s type=%s maxlength=%u%s %s></label><br><br>",
-            f->label, f->key, type, f->max_len, extra, INPUT_STYLE);
+            "<label>%s<br><input name=%s type=%s maxlength=%u value=\"%s\"%s%s %s></label><br><br>",
+            f->label, f->key, type, f->max_len, esc, extra,
+            f->secret ? " placeholder=\"(leave blank to keep)\"" : "", INPUT_STYLE);
         httpd_resp_sendstr_chunk(req, row);
         if (is_ssid) {
             /* A visible dropdown of scanned networks (the <datalist> above is
@@ -89,10 +119,21 @@ static esp_err_t form_get(httpd_req_t *req)
                 continue;
             }
             const char *type = f->secret ? "password" : "text";
+            esc[0] = '\0';
+            if (!f->secret) {
+                char cur[160] = {0};
+                app_store_t st;
+                if (app_store_open(&st, grp->ns) == ESP_OK) {
+                    app_store_get_str(&st, f->key, cur, sizeof(cur), "");
+                    app_store_close(&st);
+                }
+                html_attr(cur, esc, sizeof(esc));
+            }
             snprintf(row, sizeof(row),
-                "<label>%s<br><input name=\"" APP_CFG_FORM_PREFIX "%s.%s\" type=%s maxlength=%u %s>"
-                "</label><br><br>",
-                f->label, grp->ns, f->key, type, f->max_len, INPUT_STYLE);
+                "<label>%s<br><input name=\"" APP_CFG_FORM_PREFIX "%s.%s\" type=%s maxlength=%u "
+                "value=\"%s\"%s %s></label><br><br>",
+                f->label, grp->ns, f->key, type, f->max_len, esc,
+                f->secret ? " placeholder=\"(leave blank to keep)\"" : "", INPUT_STYLE);
             httpd_resp_sendstr_chunk(req, row);
         }
     }
@@ -223,6 +264,13 @@ static esp_err_t save_post(httpd_req_t *req)
     }
     body[got] = '\0';
 
+    /* First-provisioning (SoftAP) reboots to connect; an already-provisioned edit
+     * (LAN config page) applies live — reboot only if Wi-Fi creds changed (§7A). */
+    bool first = !config_is_provisioned();
+    char old_ssid[WIFI_SSID_BUF] = {0};
+    config_get_str("wifi_ssid", old_ssid, sizeof(old_ssid));
+    bool wifi_changed = false;
+
     /* key=value&… — route each field: core keys → nvs_config; "cfg.<ns>.<key>"
      * (§9.4) → the app's app_store namespace. */
     int n_set = 0;
@@ -259,10 +307,16 @@ static esp_err_t save_post(httpd_req_t *req)
 
         const cfg_field_t *f = config_find(key);
         if (f && f->write_path == CFG_WP_PROVISION) {
+            if (f->secret && val[0] == '\0') {
+                continue;                      /* blank secret → keep the stored value */
+            }
             config_set_str(key, val);
             n_set++;
             if (strcmp(key, "wifi_ssid") == 0) {
                 strlcpy(ssid, val, sizeof(ssid));
+                if (strcmp(val, old_ssid) != 0) wifi_changed = true;
+            } else if (strcmp(key, "wifi_psk") == 0) {
+                wifi_changed = true;           /* a new (non-empty) password was given */
             }
         }
     }
@@ -274,19 +328,31 @@ static esp_err_t save_post(httpd_req_t *req)
     }
 
     config_set_provisioned(true);
-    ESP_LOGI(TAG, "saved %d fields; provisioned; rebooting to join '%s'", n_set, ssid);
-
     char page[512];
-    snprintf(page, sizeof(page),
-        "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
-        "<body style=\"font-family:sans-serif;max-width:30em;margin:2em auto;padding:0 1em\">"
-        "<h1>Saved &#10003;</h1><p>TaskMaster is restarting and connecting to <b>%s</b>. "
-        "This setup network will turn off. If it reappears in ~30s, the connection failed "
-        "&mdash; rejoin and re-check the password.</p></body>", ssid);
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_sendstr(req, page);
 
-    schedule_reboot();   /* boot-mode branch then connects as a station (§7A.3) */
+    if (first || wifi_changed) {
+        /* First setup, or Wi-Fi creds changed → reboot for a clean (re)connect. */
+        ESP_LOGI(TAG, "saved %d fields; rebooting to join '%s'", n_set, ssid);
+        snprintf(page, sizeof(page),
+            "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
+            "<body style=\"font-family:sans-serif;max-width:30em;margin:2em auto;padding:0 1em\">"
+            "<h1>Saved &#10003;</h1><p>TaskMaster is restarting and connecting to <b>%s</b>. "
+            "If a setup network reappears in ~30s, the connection failed &mdash; rejoin and "
+            "re-check the password.</p></body>", ssid);
+        httpd_resp_sendstr(req, page);
+        schedule_reboot();   /* boot-mode branch then connects as a station (§7A.3) */
+    } else {
+        /* LAN edit, no Wi-Fi change → apply live. The wx service re-reads the city on
+         * its next poll; apps read their config on next open. No reboot. */
+        ESP_LOGI(TAG, "saved %d fields (live edit, no reboot)", n_set);
+        wx_refresh();       /* pick up a changed city / refresh weather now */
+        httpd_resp_sendstr(req,
+            "<!doctype html><meta name=viewport content=\"width=device-width,initial-scale=1\">"
+            "<body style=\"font-family:sans-serif;max-width:30em;margin:2em auto;padding:0 1em\">"
+            "<h1>Saved &#10003;</h1><p>Changes applied &mdash; no reboot needed.</p>"
+            "<p><a href=/>Back</a></p></body>");
+    }
     return ESP_OK;
 }
 
@@ -360,6 +426,20 @@ static void dns_task(void *arg)
     vTaskDelete(NULL);
 }
 
+/* Start/stop the single form httpd to match (s_ap_up || s_lan_web). */
+static void sync_httpd(void)
+{
+    bool want = s_ap_up || s_lan_web;
+    if (want && !s_httpd_up) {
+        start_http_server();
+        s_httpd_up = (s_server != NULL);
+    } else if (!want && s_httpd_up) {
+        httpd_stop(s_server);
+        s_server = NULL;
+        s_httpd_up = false;
+    }
+}
+
 esp_err_t softap_portal_start(void)
 {
     /* The radio + AP+STA mode is owned by wifi_mgr (so an existing STA link is kept
@@ -368,7 +448,8 @@ esp_err_t softap_portal_start(void)
     wifi_mgr_ap_start(SOFTAP_SSID);
     ESP_LOGI(TAG, "SoftAP '%s' up (open), join then browse http://%s", SOFTAP_SSID, SOFTAP_IP);
 
-    start_http_server();
+    s_ap_up = true;
+    sync_httpd();               /* the form server (shared with the LAN config page) */
     s_dns_run = true;
     xTaskCreate(dns_task, "dns", DNS_TASK_STACK, NULL, DNS_TASK_PRIO, &s_dns_task);
     return ESP_OK;
@@ -376,12 +457,32 @@ esp_err_t softap_portal_start(void)
 
 esp_err_t softap_portal_stop(void)
 {
-    if (s_server) {
-        httpd_stop(s_server);
-        s_server = NULL;
-    }
     s_dns_run = false;          /* dns_task closes its socket and self-deletes ≤0.5s */
+    s_ap_up = false;
+    sync_httpd();               /* stops the server unless the LAN config page holds it */
     wifi_mgr_ap_stop();         /* drop the AP, keep any STA link (back to STA-only) */
     ESP_LOGI(TAG, "portal stopped");
     return ESP_OK;
+}
+
+/* ── LAN config page: the same form served on the station IP (Settings toggle) ── */
+esp_err_t config_web_start(void)
+{
+    s_lan_web = true;
+    sync_httpd();
+    ESP_LOGI(TAG, "LAN config web %s (browse the device IP shown in Device info)",
+             s_httpd_up ? "up" : "FAILED");
+    return s_httpd_up ? ESP_OK : ESP_FAIL;
+}
+
+void config_web_stop(void)
+{
+    s_lan_web = false;
+    sync_httpd();
+    ESP_LOGI(TAG, "LAN config web down");
+}
+
+bool config_web_active(void)
+{
+    return s_lan_web;
 }

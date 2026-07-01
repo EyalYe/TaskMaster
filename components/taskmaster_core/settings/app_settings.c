@@ -324,6 +324,20 @@ static void deep_sleep_set(void *ctx, int on)
     config_set_u8("deep_sleep", on ? 1 : 0);
 }
 
+/* ── web config (TOGGLE): serve the config form on the station IP (§7A) ── */
+static int webcfg_get(void *ctx)
+{
+    (void)ctx;
+    return config_web_active() ? 1 : 0;
+}
+
+static void webcfg_set(void *ctx, int on)
+{
+    (void)ctx;
+    if (on) config_web_start();   /* browse the IP shown in Device info */
+    else    config_web_stop();
+}
+
 /* ── per-app ACFG_KNOB rows (§9.4): each carries its {ns, field}; values live in the
  * app's own app_store namespace, so core edits app config without naming any app. ── */
 typedef struct { const char *ns; const app_cfg_field_t *f; } app_knob_ctx_t;
@@ -456,7 +470,7 @@ static void act_ota(void *ctx)
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
  * Indexed so a row's runtime bits (e.g. dynamic ENUM choices) can be filled in init. */
 enum {
-    SI_WIFI, SI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_TIMEOUT,
+    SI_WIFI, SI_SETUP, SI_WEBCFG, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_TIMEOUT,
     SI_DEEPSLEEP, SI_UPDATE, SI_DELETE, SI_RESTART, SI_FACTORY, SI_COUNT
 };
 static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
@@ -464,6 +478,8 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
                          .get = wifi_get, .set = wifi_set },
     [SI_SETUP]       = { .label = "Setup",       .kind = SETTING_ACTION,
                          .action = act_wifi_setup },
+    [SI_WEBCFG]      = { .label = "Web config",  .kind = SETTING_TOGGLE,
+                         .get = webcfg_get, .set = webcfg_set },
     [SI_DEVICE_INFO] = { .label = "Device info", .kind = SETTING_ACTION,
                          .action = act_device_info },
     [SI_STARTUP]     = { .label = "Startup",     .kind = SETTING_ENUM,

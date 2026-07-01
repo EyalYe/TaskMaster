@@ -388,9 +388,10 @@ weather). Verify each step on hardware.
    Getters `wx_time_str()` / `wx_weather()` / `wx_weather_desc()` (WMO→word); cached, refresh ~15 min,
    retry ~30 s. **No API key / signup** (fits the §6D onboarding). Verified: `Petah Tikva` → geocode ok
    → `25 C, code 2, offset 10800s` → local `01:25`. *(cJSON added to core; HTTPS via the cert bundle.)*
-   - **UX warts for the cohesion pass (step 6):** setting the city currently needs a full
-     re-provision (form re-enters Wi-Fi); an unrecognized city name silently yields no weather. Consider
-     an easier city edit + a "not found" hint.
+   - **Editing the city (+ any config) without re-provisioning — ✅ done via the LAN config page**
+     (§7A.12): Settings **Web config** toggle serves the pre-filled form on the station IP; edit the
+     city, Save → applies live (no reboot) and `wx_refresh()` re-geocodes within seconds. *(Remaining
+     wart for step 6: an unrecognized city name silently yields no weather — add a "not found" hint.)*
 5. **Launcher status bar.** A top strip on the **Launcher only** (apps unaffected): connectivity glyph +
    local time + weather — shown **only when online + city set**; offline / Wi-Fi-off / no-city → today's
    plain list. Composes steps 2+4.
@@ -605,6 +606,19 @@ standard, well-supported components):
 
 The OLED's role during setup is purely **instructional** (network name, URL, status) — the knob never
 enters characters.
+
+### 7A.12 LAN config page — edit config without re-provisioning ✅
+Re-running SoftAP setup just to change one field (e.g. the weather `city`, or a token) is painful, so
+the **same config form is also served on the station IP** — browse to the device's LAN IP (shown in
+**Settings → Device info**) and edit fields from any browser on the network. Built on the existing
+`softap_portal` httpd (one server, shared): `config_web_start/stop()` bring it up on STA without the
+AP or captive DNS; a Settings **Web config** toggle gates it (session-only — **off after reboot**, the
+safe default). The form is **pre-filled** with current values (secrets blank, "leave blank to keep")
+and **saves additively** — only changed fields are written, blank secrets keep their stored value. A
+non-Wi-Fi edit **applies live** (no reboot): the `wx` service is poked (`wx_refresh()`) to re-geocode a
+changed city within seconds, apps re-read config on next open; **only a Wi-Fi credential change
+reboots** (clean reconnect). *(Security: LAN-open while the toggle is on; secrets are write-only/masked.
+A PIN is a future option — §14 Phase 6.)*
 
 ### Second transport — BLE provisioning (Phase 5, nice-to-have)
 ESP-IDF's `wifi_provisioning` component supports a **BLE transport** alongside SoftAP using the same
