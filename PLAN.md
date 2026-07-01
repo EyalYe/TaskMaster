@@ -1019,13 +1019,15 @@ wiring UI + behavior onto them.)
    action can't re-enter a live modal). `app_settings` rewritten onto both. *(Schema-driven over bespoke
    per-screen — matches the declarative `nvs_config` / `app_config` tables.)* **Verified:** Wi-Fi TOGGLE
    flips in place; Restart + Factory reset run behind the confirm dialog.
-1. **Quick wins.** **Restart** (`esp_restart`) + **Factory reset** (`config_factory_reset()` behind the
-   confirm dialog → reboot into Wi-Fi setup) — ✅ done (landed with step 0). **Remaining: Device /
-   network info** (read-only: IP, MAC, RSSI, SSID, **firmware version + build date**, free heap, uptime).
-2. **Startup behavior** (Launcher / a specific app / last-used) — a schema ENUM over `startup_tgt`,
-   honored at boot by `app_manager` (unprovisioned still overrides → Wi-Fi setup, §7A.3).
-3. **OLED brightness / contrast** — a schema RANGE driving the SH1106 contrast register; applied live +
-   persisted. *(Added to Settings per decision.)*
+1. **Quick wins. ✅ Done.** **Restart** + **Factory reset** (behind the confirm dialog) landed with
+   step 0; **Device / network info** is a read-only scrollable sub-screen (SSID, RSSI/net, IP, MAC, FW
+   version, **build date**, free heap, uptime) reached via a "Device info" action.
+2. **Startup behavior. ✅ Done.** A schema **ENUM** over `startup_tgt` — choices built at init from the
+   app registry ("Launcher" + each app). `main.c` honors it at boot (falls back to Launcher if the
+   target is unset / stale / unavailable); unprovisioned/Home-held still overrides → Wi-Fi setup.
+   *(Deferred: a "last used" choice — needs last-app persistence.)*
+3. **OLED brightness / contrast. ✅ Done.** A schema **RANGE** (10–100%, step 10) → `sh1106_set_contrast`
+   (new core key `bright`); applied live + restored at boot (`app_settings_apply_brightness`).
 4. **Inactivity timeout** (Off / 30s / 1m / 5m / 15m — schema ENUM over `idle_to_s`) + the idle timer:
    **Stage 1** blank/dim the OLED + pause the render loop; any input restores instantly.
 5. **Deep-sleep toggle + light sleep.** First convert input from the **1 ms poll → interrupt /
