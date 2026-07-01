@@ -16,23 +16,32 @@ typedef struct device_app {
     void (*on_event)(uint8_t ev);     // input event (see §3) — Home is never delivered
     void (*render)(void);             // draw the current state
     void (*exit)(void);               // teardown / free everything
+    bool (*available)(void);          // optional: false = hide from the Launcher (§7); NULL = always shown
 } device_app_t;
 ```
+
+`available()` is **optional** (leave it `NULL` to always show). Return `false` to hide your app from
+the Launcher until it's usable — e.g. a task source with no server URL configured. It's called while
+your app is **not** active, so read config directly (`app_store`, §6) — don't assume `init()` has run.
 
 Minimal app:
 
 ```c
 #include "app.h"
-#include "sh1106.h"
+#include "ui_frame.h"
 
 static void my_init(void)           { /* reset state */ }
 static void my_on_event(uint8_t ev) { /* update state */ }
-static void my_render(void)         { sh1106_clear(); sh1106_text_line(0, "HI"); sh1106_flush(); }
+static void my_render(void) {
+    lv_obj_clean(ui_frame_content());   // clear the content area
+    ui_text_row(0, "Hi there");         // one line of text (row 0)
+    ui_frame_set_hints(NULL);           // no hint bar → full width (see §4)
+}
 static void my_exit(void)           { /* free everything init() could have allocated */ }
 
 static const device_app_t my_app = {
     .name = "MyApp", .init = my_init, .on_event = my_on_event,
-    .render = my_render, .exit = my_exit,
+    .render = my_render, .exit = my_exit,   // .available optional
 };
 TASKMASTER_REGISTER_APP(my_app);
 ```
@@ -77,71 +86,62 @@ After `on_event` returns, the platform calls your `render()`. To label what the 
 
 ## 4. Screen & the control hint bar
 
-The display is a **128×64 monochrome** OLED. Your app draws in `render()`.
+The display is a **128×64 monochrome** OLED, driven by **LVGL**. Your app draws in `render()` by
+building LVGL widgets into the OS-owned **content area** (`ui_frame.h`) — you don't touch the panel or
+`sh1106` directly (the OS pumps LVGL onto the framebuffer for you).
 
 ### Drawing
 
-Today the renderer is the raw `sh1106` framebuffer. **(Phase 3 replaces this with LVGL — the *layout
-contract* below is stable; the exact draw calls will change.)**
-
 ```c
-#include "sh1106.h"
-sh1106_clear();                  // clear the framebuffer
-sh1106_text_line(row, "HELLO");  // text on an 8px row (0..7), clears the full-width row first
-sh1106_text(x, row, "X");        // text at pixel-x on an 8px row
-sh1106_text_at(x, y, "X");       // text at an arbitrary pixel (x, y) — for centering
-sh1106_pixel(x, y, 1);           // set (1) / clear (0) one pixel
-sh1106_flush();                  // push the framebuffer to the panel
+#include "ui_frame.h"
+
+lv_obj_clean(ui_frame_content());     // clear the content area (start of every render)
+ui_text_row(row, "Hello");            // one text line at row 0..UI_ROWS-1
+ui_text(x, y, "Hello");               // text at a pixel (x, y) in the content area
+ui_text_row_scroll(row, txt);         // full-width line that auto-scrolls if too long (titles/URLs)
+ui_text_wrap(row, txt);               // word-wrapped multi-line body (e.g. a description)
 ```
 
-Font note: the bring-up font is **uppercase + digits/punctuation only** — no lowercase yet (a fuller
-font arrives with LVGL in Phase 3).
+- Rows are laid out for you: `UI_ROWS` lines fit the panel, `UI_ROW_H` px each (constants in
+  `ui_frame.h`). Use `ui_text_row()` and forget pixel math.
+- The content font is proportional **DejaVu Sans 11** — full upper/lower case, digits, punctuation.
+- `ui_frame_content()` returns the LVGL container if you need raw `lv_*` widgets; the OS clears it
+  between app switches (`ui_frame_reset_content()`), so `exit()` needn't free widgets.
+
+For a scrollable/selectable list (menus, task lists), use the generic **`ui_list`** (`ui_list.h`):
+`ui_list_init/set_count/move/sel/draw` — it owns the scroll window + selection cursor; you supply each
+row's text via a callback. (The Launcher, Settings, and the task apps are all built on it.)
 
 ### The hint bar (opt-in)
 
-The OS can draw a **vertical control hint bar** down the right edge so the user always sees what the
-knob/Select do *right now*. It's **per-app and optional** because screen space is scarce:
+The OS draws a **vertical control hint bar** down the right edge so the user always sees what the
+knob/Select do *right now* — you just declare the labels and call one function:
 
-- **Use it** → the OS draws a **21px-wide** right column; your content area is the **left 107×64**.
-- **Skip it** → you own the **full 128×64**.
+- **Show it** (`ui_frame_set_hints(&HINTS)`) → the OS draws the right column; content narrows to the
+  left of it. Draw your rows first, then set the hints (setting hints sizes the content width).
+- **Full screen** (`ui_frame_set_hints(NULL)`) → you own the whole 128 px width.
 
-Geometry constants are in `hint_bar.h` (`HINT_BAR_X`, `HINT_BAR_W`, `CONTENT_W`) — lay out content
-against `CONTENT_W` when you show the bar.
-
-Three boxes, top → bottom:
-
-| Box | Control | Who sets it |
-|---|---|---|
-| top | **Home** | OS-fixed — always "back to Launcher"; you never set it |
-| middle | **Encoder** — split into rotate (top cell) / push (bottom cell) | you |
-| bottom | **Select** | you |
-
-Declare your control labels (≤3 chars; glyphs in the LVGL version):
+Three boxes, top → bottom: **Home** (OS-fixed, always "back to Launcher"), **Encoder** (rotate over
+push), **Select**. Declare labels (≤3 chars) with `control_hints_t` (`hint_bar.h`):
 
 ```c
-#include "hint_bar.h"
+#include "ui_frame.h"   // pulls in hint_bar.h (control_hints_t)
 
 static const control_hints_t HINTS = {
-    .rotate = "<>",    // encoder rotate → top cell    (NULL = default ↻)
+    .rotate = "<>",    // encoder rotate → top cell    (NULL = default glyph)
     .click  = "OPN",   // encoder push   → bottom cell (NULL = hide)
     .select = "DON",   // Select button  → bottom box  (NULL = hide)
 };
-```
 
-Show it from `render()` — **interim API**; in LVGL this becomes `ui_set_hints()` and the OS draws the
-bar for you (only the call site changes — `control_hints_t` stays):
-
-```c
 static void my_render(void) {
-    sh1106_clear();
-    // ... draw your content within the left 107px while the bar is shown ...
-    hint_bar_draw(&HINTS);   // the right column
-    sh1106_flush();
+    lv_obj_clean(ui_frame_content());
+    ui_text_row(0, "My content");
+    ui_frame_set_hints(&HINTS);   // or NULL for full width
 }
 ```
 
-An app that wants the whole screen simply **doesn't** call `hint_bar_draw()` and draws across all
-128px. **Home still works** as the physical escape hatch regardless of the bar.
+**Home still works** as the physical escape hatch regardless of the bar. Re-publish hints whenever your
+app changes mode (e.g. a list vs. a detail submenu) so the bar always matches the current controls.
 
 ## 5. Reading platform status — connectivity
 
@@ -149,12 +149,13 @@ Connectivity is platform state; read it from one place, no Wi-Fi handling in you
 
 ```c
 #include "net_status.h"
+#include "ui_frame.h"
 
 void my_render(void) {
     net_status_t ns;
     net_status_get(&ns);                 // mutex-guarded snapshot
     if (ns.online) { /* fetch-backed UI */ }
-    sh1106_text_line(7, net_state_str(ns.state));  // "OFF"/"---"/"..."/"OK"/"SETUP"
+    ui_text_row(UI_ROWS - 1, net_state_str(ns.state));  // "OFF"/"---"/"..."/"OK"/"SETUP"
 }
 ```
 
@@ -166,8 +167,8 @@ so the value you read there is always current. (Internally a `EV_SYS_NET_CHANGED
 the redraw; system events are handled by the UI and never reach `on_event`.) If you need to *act* on a
 transition rather than just redraw, cache the previous `state` in your own struct and compare.
 
-Never call `esp_wifi_*` yourself — the radio is owned by core (the network task, the Setup app, and
-the Settings `WIFI_EN` toggle). The same `*_get()` + auto-re-render pattern will expose future status
+Never call `esp_wifi_*` yourself — the radio is owned by core (`wifi_mgr`, the Settings app's Wi-Fi
+setup portal, and its `WIFI_EN` toggle). The same `*_get()` + auto-re-render pattern will expose future status
 (battery, sync state) as the platform grows.
 
 ## 6. Persisting your own data (`app_store.h`)
@@ -272,27 +273,45 @@ typedef struct {            // your job context — core COPIES this at submit
     int   count;            //  outputs (filled by work, read by done)
 } fetch_ctx_t;
 
-static esp_http_client_handle_t s_client;   // so cancel can abort it
-
-static void abort_fetch(void *arg) { (void)arg; esp_http_client_close(s_client); }
+static async_job_t *s_job;  // track the in-flight job so exit() can cancel it
 
 static bool fetch_work(async_job_t *job, void *ctx) {     // WORKER task
     fetch_ctx_t *c = ctx;
-    async_job_on_cancel(job, abort_fetch, NULL);          // let cancel unblock us
-    // ... esp_http_client GET c->url, parse into c-> outputs ...
-    if (async_job_cancelled(job)) return false;
-    return true;
+    // The client handle is a LOCAL — worker-owned, never a shared/static the UI task
+    // could touch (esp_http_client is NOT thread-safe).
+    esp_http_client_handle_t client =
+        esp_http_client_init(&(esp_http_client_config_t){ .url = c->url });
+    char *body = malloc(BODY_MAX);
+    if (body && esp_http_client_open(client, 0) == ESP_OK) {
+        esp_http_client_fetch_headers(client);
+        int total = 0, r;
+        // Poll the cancel flag each iteration so Home mid-fetch bails cooperatively.
+        while (total < BODY_MAX - 1 && !async_job_cancelled(job) &&
+               (r = esp_http_client_read(client, body + total, BODY_MAX - 1 - total)) > 0) {
+            total += r;
+        }
+        esp_http_client_close(client);
+        if (!async_job_cancelled(job)) { /* parse body into c->outputs */ }
+    }
+    free(body);
+    esp_http_client_cleanup(client);   // the worker frees its own client
+    return !async_job_cancelled(job);
 }
 
-static void fetch_done(void *ctx, bool ok) {              // UI task
+static void fetch_done(void *ctx, bool ok) {              // UI task (skipped if cancelled)
     fetch_ctx_t *c = ctx;
     if (ok) { /* copy c->outputs into your app model, re-render */ }
+    s_job = NULL;
 }
 
 static void my_sync(void) {
     fetch_ctx_t c = {0};
     snprintf(c.url, sizeof c.url, "%s", my_url);
-    async_job_submit(fetch_work, fetch_done, &c, sizeof c);   // c may go out of scope — it's copied
+    s_job = async_job_submit(fetch_work, fetch_done, &c, sizeof c);   // c is copied
+}
+
+static void my_exit(void) {
+    if (s_job) { async_job_cancel(s_job); s_job = NULL; }   // cooperative — see rules
 }
 ```
 
@@ -301,9 +320,14 @@ Rules that keep teardown safe (§6A):
   core copies `ctx`: even if the user hits Home mid-fetch and your app is torn down, the worker only
   touches the copy. Put both inputs and outputs in the `ctx` struct; `done` copies outputs into your
   model.
-- **Register an abort hook** (`async_job_on_cancel`) for any blocking call, and **call
-  `async_job_cancel(job)` in your `exit()`**. Cancel sets a flag *and* fires your abort hook (e.g.
-  `esp_http_client_close`) so the blocked `work` returns; a cancelled job's `done` is skipped. Never
-  rely on the job being killed — it unwinds cooperatively and frees its own resources.
+- **Cancel is cooperative (flag-only).** Keep the client handle **worker-local**, poll
+  `async_job_cancelled(job)` in your read loop, and let the worker free its own client. Call
+  `async_job_cancel(job)` in your `exit()` — it sets the flag and returns immediately (it does **not**
+  join the worker). A cancelled job's `done` is skipped, so a worker still finishing after you exit
+  can't write into freed state; it unwinds within its I/O timeout.
+- **⚠️ Never tear down a non-thread-safe handle from another task.** Do **not** close/free the
+  `esp_http_client` from the UI thread (e.g. via an `async_job_on_cancel` abort hook) while the worker
+  is inside `read()`/`open()` — that's a data race that **crashes** (it did; that's why this pattern
+  changed). The `async_job_on_cancel` hook exists only for genuinely thread-safe wakeups.
 - One job at a time (single worker): `async_job_submit` returns `NULL` if one is already running —
   skip this sync and try again later.
