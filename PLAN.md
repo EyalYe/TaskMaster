@@ -1049,8 +1049,17 @@ wiring UI + behavior onto them.)
    stays form-only (Wi-Fi setup re-opens it). Demonstrated: `app_hello` declares an `ACFG_KNOB` "step"
    (1–10) knob-edited in Settings and used by the app. *(Masked-PASTE-with-re-provision-per-app is
    redundant with Wi-Fi setup on this screen, so it's omitted.)*
-7. **OTA update (Phase 4.5).** Stub / "coming soon" until then; the real path pulls a signed image from
-   `fw_url` via `esp_https_ota` with rollback (§9).
+7. **OTA update. ✅ Done + verified on hardware.** Settings **Check update** (confirm) → `act_ota` reads
+   `fw_url` and runs **`esp_https_ota`** on the async worker (cert bundle for HTTPS; http also works):
+   download → spare OTA slot → set boot → reboot into the new (pending-verify) image. `main` calls
+   **`esp_ota_mark_app_valid_cancel_rollback()`** once core services are up, so the bootloader **reverts**
+   a bad image (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`). `ui_inhibit_sleep()` holds off idle-blank +
+   light sleep during the flash. **Verified:** served the build over HTTP, triggered from the device →
+   `Writing to <ota_1>` → rebooted `Loaded app from partition at offset 0x200000` (booted the OTA'd
+   slot) → new image ran clean + self-confirmed. *(Deferred to Phase 4.5: image signing / a real update
+   server + a version-bump check before downloading.)*
+
+**Phase 4 complete** (steps 0–7). ✅
 
 **Decisions / out of scope (this phase):**
 - **Sync interval is app-owned, not a core setting** (core⟂app, §11.2). An app either **hardcodes** it

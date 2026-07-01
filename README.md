@@ -14,10 +14,10 @@ progress. The current stepped plan lives in [`PLAN.md`](PLAN.md).
 | **0–1** | Bring-up: SH1106 OLED, EC11 encoder + buttons, and a manifest-driven app framework + Launcher on one UI task | ✅ |
 | **2** | **Paste-from-phone provisioning** — SoftAP captive form writes Wi-Fi + app config to NVS | ✅ |
 | **3** | **LVGL UI + tasks in userspace** — Todoist (direct HTTPS) and LAN task apps; offline cache + write replay; the Settings hub | ✅ |
-| **4** | Settings build-out (schema-driven) + power/idle (light sleep, GPIO-wake) | ◀ next |
-| **5** | BLE provisioning | planned |
+| **4** | **Settings hub** (schema-driven) + power/idle (blank, light sleep) + **OTA update** | ✅ |
+| **5** | BLE provisioning | ◀ next |
 
-## What the device does today (Phase 3)
+## What the device does today (Phase 4)
 
 A self-contained **OS** for the device: a manifest-driven app framework with a Launcher, run by one UI
 task, that provisions itself from a phone, connects to Wi-Fi, and runs task apps against a real
@@ -29,8 +29,10 @@ backend — all verified on a XIAO ESP32-C3.
   description / Postpone / Sync now**). Tasks are **userspace** — core stays task-agnostic.
 - **Works offline.** Wi-Fi off or a dropped link → the last tasks render from an on-device cache with an
   **OFFLINE** banner; completions are **queued and replayed** on reconnect (with a poison-entry guard).
-- **The Settings hub.** A non-removable core app: **Wi-Fi on/off**, **Wi-Fi setup** (re-provision), and
-  the home for the rest of the device settings being built in Phase 4.
+- **The Settings hub.** A non-removable core app driven by one **schema-driven editor** (core settings
+  and per-app knobs share it): Wi-Fi on/off, Setup (re-provision), device info, startup app, OLED
+  brightness, inactivity timeout (screen blank) + deep/light sleep, delete-per-app data, restart,
+  factory reset, and **OTA update** (`esp_https_ota` from `fw_url`, with bootloader rollback).
 - **Paste-from-phone provisioning.** Boot unprovisioned (or hold **Home** at reset) → SoftAP
   `TaskMaster-Setup`; open `192.168.4.1` and paste the whole config into **one** schema-generated form
   (Wi-Fi + each app's declared fields). Nothing is typed on the knob.
