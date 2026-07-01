@@ -1,0 +1,5 @@
+- [TaskMaster-C3 project](taskmaster-c3-project.md) — ~/TaskMaster ESP-IDF ESP32-C3 task device, built on the user's ~/yapp-cli Todoist platform; spec in PLAN.md
+- [Build backup policy](build-backup-policy.md) — every successful build auto-backed-up (timestamped) to gitignored build_backups/ via CMake POST_BUILD hook
+- [Plan before code](workflow-plan-before-code.md) — document architecture in PLAN.md before implementing
+- [No magic numbers](no-magic-numbers.md) — every numeric literal must be a named #define/enum in a header; crucial professional-code standard
+- [Apps in separate repos](apps-in-separate-repos.md) — app code lives outside core in own repos (~/yappcloud, ~/yapplocal); core⟂userspace via stable app API

@@ -2,7 +2,8 @@
 
 ESP-IDF / FreeRTOS firmware for a XIAO ESP32-C3 desktop task appliance — a 1.3" OLED, a rotary
 encoder, and two buttons that show and act on your tasks (Todoist directly, or any LAN task server).
-See [`PLAN.md`](PLAN.md) for the full spec.
+See [`PLAN.md`](PLAN.md) for the full spec. Resuming work / new machine? Start with
+[`SESSION1.md`](SESSION1.md) (handoff) and [`docs/agent-memory/`](docs/agent-memory/).
 
 ## Milestones
 
