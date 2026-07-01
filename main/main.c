@@ -13,7 +13,7 @@
 #include "input.h"
 #include "app_manager.h"
 #include "app_config.h"
-#include "app_setup.h"
+#include "app_settings.h"
 #include "net_status.h"
 #include "nvs_config.h"
 #include "wifi_mgr.h"
@@ -42,7 +42,7 @@ void app_main(void)
 
     /* Register core apps (non-removable). User apps self-registered via their
      * constructors before app_main; core apps are owned by the core. */
-    app_manager_register(app_setup_get());
+    app_manager_register(app_settings_get());
 
     ESP_LOGI(TAG, "Registered apps: %u", app_manager_count());
     for (unsigned i = 0; i < app_manager_count(); i++) {
@@ -72,8 +72,9 @@ void app_main(void)
 
     const device_app_t *initial = NULL;   /* NULL = Launcher */
     if (home_held || !provisioned) {
-        ESP_LOGI(TAG, "%s -> Setup app", home_held ? "Home held at boot" : "unprovisioned");
-        initial = app_setup_get();        /* auto-launch Setup; its init() raises the portal */
+        ESP_LOGI(TAG, "%s -> Settings/Wi-Fi setup", home_held ? "Home held at boot" : "unprovisioned");
+        app_settings_enter_setup();       /* open Settings straight into the portal */
+        initial = app_settings_get();     /* its init() raises the provisioning portal */
     } else if (!wifi_en) {
         ESP_LOGI(TAG, "Wi-Fi off -> offline");
         net_status_set(NET_WIFI_OFF, 0);

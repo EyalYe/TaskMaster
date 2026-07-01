@@ -584,14 +584,19 @@ else  /* provisioned, Wi-Fi off */                       → offline            
 (The always-on **sync** task that consumes the link is Phase 3; Phase 2 delivers only the link +
 accurate `net_status`.)
 
-### 7A.4 Setup app (`app_setup`) — **interim** (folds into Settings at Phase 4)
+### 7A.4 Setup app — **folded into Settings** (`app_settings`) ✅
 
-> **Restructure (decided):** Wi-Fi setup is **not** a standalone app — it's the **Wi-Fi setup item in
-> the Settings hub** (§6). The standalone `app_setup` built in Phase 2 is an **interim provisioning
-> vehicle** (Settings doesn't exist until Phase 4). At Phase 4 its portal logic becomes the *Wi-Fi
-> setup* action inside Settings and the standalone app is removed; the boot branch then auto-opens
-> **Settings → Wi-Fi setup** instead of a separate Setup app. `wifi_mgr` / `softap_portal` /
-> `nvs_config` are unaffected — only the owning app changes.
+> **Done (brought forward from Phase 4 to unblock step 12's offline verification).** Wi-Fi setup is no
+> longer a standalone app — it's the **Wi-Fi setup item in the Settings hub** (§6). The interim
+> `app_setup` was **removed**; its portal logic is now the *Wi-Fi setup* action inside `app_settings.c`
+> (a `MODE_PORTAL` sub-mode). The boot branch auto-opens **Settings → Wi-Fi setup** when unprovisioned
+> / Home-held (`app_settings_enter_setup()` + `initial = app_settings_get()`). `wifi_mgr` /
+> `softap_portal` / `nvs_config` are unaffected — only the owning app changed.
+>
+> Settings menu (ui_list): **Wi-Fi: On/Off** — the master toggle that persists `WIFI_EN` and drives
+> `wifi_mgr_start_sta()` / `wifi_mgr_stop()` (this is how the device + task apps go offline/online,
+> §8.3 / step 12) — and **Wi-Fi setup** (raise the portal). Device info / factory reset / restart /
+> OTA-stub + the power/idle scaffolding remain for the rest of Phase 4 (§ build-order row 4).
 
 A non-removable core `device_app_t` (§6), reachable from the Launcher anytime and auto-launched at
 boot when unprovisioned.
@@ -896,8 +901,9 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
       `render()` detects the offline→online edge and drains the queue via **chained close/complete
       jobs** (`async_job`), then re-syncs — no extra task or timer. A failed replay is left queued and
       retried on the next reconnect (no server hammering; poison-entry handling deferred to step 13).
-    - **Verification blocked:** no Settings app yet ⇒ no in-UI way to toggle Wi-Fi; test deferred until
-      the Settings Wi-Fi toggle lands, then run the offline→queue→reconnect→replay flow on both apps.
+    - **Verification unblocked:** the Settings app's **Wi-Fi: On/Off** toggle (§7A.4, built) is the
+      in-UI way to go offline — toggle off, open a task app (offline banner + cached list + `OFF`
+      hint), complete a task (queued), toggle Wi-Fi on → the app replays on reconnect and re-syncs.
 13. **Harden + §6A.4 gate.** Bounded buffers, capped task count, source-down → error over cached data;
     run the leak harness on each source app incl. **Home fired mid-fetch** — now the real case, since
     `async_job_cancel()` on `exit()` is exactly what prevents the worker writing into freed memory.
