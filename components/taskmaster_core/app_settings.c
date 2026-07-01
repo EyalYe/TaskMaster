@@ -24,13 +24,18 @@
 #include "sh1106.h"
 #include "ui_frame.h"
 #include "ui_list.h"
+#include "ui.h"
 #include "settings_menu.h"
 #include "confirm.h"
+#include "async_job.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_netif.h"
 #include "esp_mac.h"
 #include "esp_app_desc.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
+#include "esp_crt_bundle.h"
 #include "esp_log.h"
 
 #include <stdio.h>
@@ -59,7 +64,12 @@ static const char *TAG = "app.settings";
 #define DEL_MAX_TARGETS     16   /* "Wi-Fi" + each app config group */
 #define DEL_PROMPT_MAX      32
 
-typedef enum { MODE_MENU, MODE_PORTAL, MODE_INFO, MODE_DELETE } settings_mode_t;
+/* OTA update (step 7). */
+#define OTA_URL_MAX         97   /* fw_url schema max_len (96) + NUL */
+#define OTA_HTTP_TMO_MS     20000
+
+typedef enum { MODE_MENU, MODE_PORTAL, MODE_INFO, MODE_DELETE, MODE_OTA } settings_mode_t;
+typedef enum { OTA_RUNNING, OTA_FAILED, OTA_NOURL } ota_state_t;
 
 /* SEL when navigating; OK when editing a value or in a confirm dialog; BAK on the
  * read-only info screen. */
@@ -84,6 +94,8 @@ static int          s_del_n;
 static int          s_del_sel;                 /* target awaiting confirm */
 static ui_list_t    s_del_list;
 static char         s_del_prompt[DEL_PROMPT_MAX];
+
+static ota_state_t  s_ota_state;               /* current MODE_OTA screen state */
 
 /* ── the provisioning portal sub-mode ── */
 static void portal_start(void)
@@ -390,11 +402,62 @@ static void act_delete_creds(void *ctx)
     s_mode = MODE_DELETE;
 }
 
+/* ── OTA update: pull a signed image from fw_url (esp_https_ota), reboot, rollback ── */
+typedef struct { char url[OTA_URL_MAX]; } ota_ctx_t;
+
+static bool ota_work(async_job_t *job, void *ctx)
+{
+    (void)job;
+    ota_ctx_t *o = (ota_ctx_t *)ctx;
+    esp_http_client_config_t http = {
+        .url               = o->url,
+        .crt_bundle_attach = esp_crt_bundle_attach,   /* HTTPS via the cert bundle */
+        .timeout_ms        = OTA_HTTP_TMO_MS,
+        .keep_alive_enable = true,
+    };
+    esp_https_ota_config_t cfg = { .http_config = &http };
+    esp_err_t err = esp_https_ota(&cfg);              /* download → spare slot → set boot */
+    ESP_LOGW(TAG, "OTA from %s: %s", o->url, esp_err_to_name(err));
+    return err == ESP_OK;
+}
+
+static void ota_done(void *ctx, bool ok)
+{
+    (void)ctx;
+    if (ok) {
+        esp_restart();                  /* boot the new (pending-verify) image (§9) */
+    }
+    ui_inhibit_sleep(false);
+    s_ota_state = OTA_FAILED;           /* stay put; user can retry */
+}
+
+static void act_ota(void *ctx)
+{
+    (void)ctx;
+    char url[OTA_URL_MAX] = {0};
+    config_get_str("fw_url", url, sizeof(url));
+    if (url[0] == '\0') {
+        s_ota_state = OTA_NOURL;
+        s_mode = MODE_OTA;
+        return;
+    }
+    ota_ctx_t o = {0};
+    strlcpy(o.url, url, sizeof(o.url));
+    ui_inhibit_sleep(true);             /* don't blank / light-sleep mid-flash */
+    if (async_job_submit(ota_work, ota_done, &o, sizeof(o))) {
+        s_ota_state = OTA_RUNNING;
+    } else {
+        ui_inhibit_sleep(false);
+        s_ota_state = OTA_FAILED;
+    }
+    s_mode = MODE_OTA;
+}
+
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
  * Indexed so a row's runtime bits (e.g. dynamic ENUM choices) can be filled in init. */
 enum {
     SI_WIFI, SI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_TIMEOUT,
-    SI_DEEPSLEEP, SI_DELETE, SI_RESTART, SI_FACTORY, SI_COUNT
+    SI_DEEPSLEEP, SI_UPDATE, SI_DELETE, SI_RESTART, SI_FACTORY, SI_COUNT
 };
 static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_WIFI]        = { .label = "Wi-Fi",       .kind = SETTING_TOGGLE,
@@ -413,6 +476,8 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
                          .choices = TIMEOUT_LABELS, .choice_count = TIMEOUT_COUNT },
     [SI_DEEPSLEEP]   = { .label = "Deep sleep",  .kind = SETTING_TOGGLE,
                          .get = deep_sleep_get, .set = deep_sleep_set },
+    [SI_UPDATE]      = { .label = "Check update", .kind = SETTING_ACTION,
+                         .action = act_ota, .confirm = "Update firmware?" },
     [SI_DELETE]      = { .label = "Delete data", .kind = SETTING_ACTION,
                          .action = act_delete_creds },
     [SI_RESTART]     = { .label = "Restart",     .kind = SETTING_ACTION,
@@ -515,6 +580,12 @@ static void settings_on_event(uint8_t ev)
         }
         return;
     }
+    if (s_mode == MODE_OTA) {           /* input ignored while running; else click = back */
+        if (s_ota_state != OTA_RUNNING && (ev == EV_ENCODER_CLICK || ev == EV_SELECT)) {
+            s_mode = MODE_MENU;
+        }
+        return;
+    }
     settings_menu_input(&s_menu, ev);
 }
 
@@ -537,6 +608,26 @@ static void settings_render(void)
         ui_frame_set_hints(&SETTINGS_HINTS);
         ui_text_row(SETTINGS_TITLE_ROW, "Delete data");
         ui_list_draw(&s_del_list, SETTINGS_LIST_ROW, del_row_text, NULL);
+        return;
+    }
+
+    if (s_mode == MODE_OTA) {
+        ui_frame_set_hints(NULL);       /* full width, no controls while updating */
+        switch (s_ota_state) {
+        case OTA_RUNNING:
+            ui_text_row(0, "Updating...");
+            ui_text_row(1, "do not unplug");
+            break;
+        case OTA_NOURL:
+            ui_text_row(0, "No update URL");
+            ui_text_row(1, "set it in Setup");
+            break;
+        case OTA_FAILED:
+        default:
+            ui_text_row(0, "Update failed");
+            ui_text_row(1, "click to go back");
+            break;
+        }
         return;
     }
 

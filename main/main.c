@@ -8,6 +8,7 @@
  */
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_ota_ops.h"
 #include <string.h>
 
 #include "sh1106.h"
@@ -41,6 +42,11 @@ void app_main(void)
     }
     lvgl_disp_init();   /* LVGL on the panel (via the sh1106 framebuffer); the UI task pumps it */
     app_settings_apply_brightness();   /* restore the saved OLED brightness (§8A) */
+
+    /* OTA rollback (§9): if we just booted a freshly-OTA'd image (pending-verify), the
+     * core services above came up cleanly — mark it valid so the bootloader keeps it.
+     * A no-op on a normal boot. If we'd crashed before here, the bootloader reverts. */
+    esp_ota_mark_app_valid_cancel_rollback();
 
     /* Register core apps (non-removable). User apps self-registered via their
      * constructors before app_main; core apps are owned by the core. */

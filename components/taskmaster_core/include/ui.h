@@ -27,3 +27,8 @@
  * auto-launch the Setup app in provisioning mode (§7A.3/§7A.4). The task owns
  * dispatch from here on and never returns. */
 void ui_start(QueueHandle_t input_events, const device_app_t *initial_app);
+
+/* Inhibit idle screen-blanking + light sleep while a critical operation runs (e.g. an
+ * OTA update must not blank or halt the CPU mid-flash). Call with true to hold, false
+ * to release. (§8A / step 7.) */
+void ui_inhibit_sleep(bool on);

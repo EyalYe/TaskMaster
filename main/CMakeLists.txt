@@ -2,5 +2,5 @@
 idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
-    REQUIRES taskmaster_core nvs_flash
+    REQUIRES taskmaster_core nvs_flash app_update
 )

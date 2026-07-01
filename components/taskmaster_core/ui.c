@@ -29,6 +29,9 @@ static const device_app_t *s_initial_app;   /* boot app, NULL = Launcher */
  * the next user press wakes it (and is consumed). System events don't count as input. */
 static uint32_t s_last_input_ms;
 static bool     s_blanked;
+static bool     s_sleep_inhibited;   /* true while OTA (etc.) must keep the CPU + panel up */
+
+void ui_inhibit_sleep(bool on) { s_sleep_inhibited = on; }
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -49,7 +52,7 @@ static void screen_wake(void)
 /* Blank the panel once idle_to_s (0 = off) has elapsed with no user input. */
 static void maybe_blank(void)
 {
-    if (s_blanked) {
+    if (s_blanked || s_sleep_inhibited) {
         return;
     }
     uint16_t to_s = 0;
@@ -123,7 +126,7 @@ static void ui_task(void *arg)
              * delivered below (wakes the screen). Else just idle-poll (Stage 1). */
             uint8_t deep = 0;
             config_get_u8("deep_sleep", &deep);
-            if (deep) {
+            if (deep && !s_sleep_inhibited) {
                 ESP_LOGI(TAG, "light sleep");
                 input_light_sleep();
                 ESP_LOGI(TAG, "woke");

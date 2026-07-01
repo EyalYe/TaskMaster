@@ -5,6 +5,11 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# --- OTA (§9, step 7): dual-slot update + rollback. A freshly-OTA'd image boots as
+# pending-verify; main calls esp_ota_mark_app_valid_cancel_rollback() once it's healthy,
+# else the bootloader reverts to the previous slot on the next reboot. ---
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # --- FreeRTOS: 1kHz tick so the 1ms input poll task is responsive (PLAN §4.6) ---
 CONFIG_FREERTOS_HZ=1000
 

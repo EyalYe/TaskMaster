@@ -40,5 +40,9 @@ idf_component_register(
         lwip
         nvs_flash
         esp_timer
-        esp_app_format   # esp_app_get_description() for the Device-info screen
+        esp_app_format     # esp_app_get_description() for the Device-info screen
+        esp_https_ota      # OTA update from fw_url (Settings → Check update, step 7)
+        bootloader_support # pulled in by esp_https_ota.h (bootloader_common.h)
+        esp-tls            # esp_crt_bundle_attach for the OTA HTTPS connection
+        mbedtls            # esp_crt_bundle.h
 )
