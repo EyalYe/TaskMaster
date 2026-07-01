@@ -9,6 +9,8 @@ idf_component_register(
         "async_job.c"
         "wifi_mgr.c"
         "app_settings.c"
+        "settings_menu.c"
+        "confirm.c"
         "leak_test.c"
         "lvgl_disp.c"
         "lv_font_tm5x7.c"

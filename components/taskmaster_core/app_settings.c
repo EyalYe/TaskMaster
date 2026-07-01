@@ -2,15 +2,15 @@
  * app_settings.c — the Settings core app (device hub). See app_settings.h.
  *
  * Two modes:
- *   MENU   → a ui_list of settings: Wi-Fi on/off toggle, "Wi-Fi setup".
+ *   MENU   → a schema-driven settings editor (settings_menu.h) over a declared table
+ *            of rows; a modal confirm dialog (confirm.h) guards destructive actions.
  *   PORTAL → the SoftAP provisioning portal is up; the screen shows the join
- *            instructions (phone-driven, no on-device input). Folded in from the
- *            old Setup app.
+ *            instructions (phone-driven). Folded in from the old Setup app.
  *
- * The Wi-Fi toggle persists WIFI_EN (nvs_config) and drives wifi_mgr, so the rest
- * of the system — and the task apps — just read net_status (this is what makes an
- * app go offline, §8.3 / step 12). Home is OS-reserved: from either mode it exits
- * to the Launcher, tearing the portal down cleanly (§6A) via exit().
+ * The Wi-Fi toggle persists WIFI_EN (nvs_config) and drives wifi_mgr, so the rest of
+ * the system — and the task apps — just read net_status (this is what takes an app
+ * offline, §8.3 / step 12). Home is OS-reserved: it exits to the Launcher, tearing the
+ * portal down cleanly (§6A) via exit(). New settings are added as table rows (§8A.1).
  */
 #include "app_settings.h"
 
@@ -19,11 +19,10 @@
 #include "net_status.h"
 #include "nvs_config.h"
 #include "ui_frame.h"
-#include "ui_list.h"
-#include "input.h"
+#include "settings_menu.h"
+#include "confirm.h"
+#include "esp_system.h"
 #include "esp_log.h"
-
-#include <stdio.h>
 
 static const char *TAG = "app.settings";
 
@@ -31,13 +30,6 @@ static const char *TAG = "app.settings";
 #define SETTINGS_TITLE_ROW  0
 #define SETTINGS_LIST_ROW   1                    /* list starts below the title */
 #define SETTINGS_LIST_ROWS  (UI_ROWS - 1)        /* rows below the title */
-
-/* Menu entries, in row order. */
-enum {
-    SETTINGS_ITEM_WIFI = 0,     /* Wi-Fi on/off toggle */
-    SETTINGS_ITEM_SETUP,        /* raise the provisioning portal */
-    SETTINGS_ITEM_COUNT
-};
 
 /* Portal (instructional) layout — mirrors the old Setup screen. */
 #define PORTAL_TITLE_ROW    0
@@ -48,37 +40,16 @@ enum {
 
 typedef enum { MODE_MENU, MODE_PORTAL } settings_mode_t;
 
-static const control_hints_t SETTINGS_HINTS = { .rotate = "<>", .click = "SEL", .select = "SEL" };
+/* SEL when navigating; OK when editing a value or in a confirm dialog. */
+static const control_hints_t SETTINGS_HINTS      = { .rotate = "<>", .click = "SEL", .select = "SEL" };
+static const control_hints_t SETTINGS_HINTS_EDIT = { .rotate = "<>", .click = "OK",  .select = "OK" };
 
 static settings_mode_t s_mode;
 static bool            s_portal_up;
 static bool            s_enter_setup;   /* boot asked us to open in portal mode */
-static ui_list_t       s_list;
+static settings_menu_t s_menu;
 
-static bool wifi_is_on(void)
-{
-    uint8_t en = 1;                     /* default on if never set */
-    config_get_u8("wifi_en", &en);
-    return en != 0;
-}
-
-/* ui_list row text for the settings menu. */
-static void settings_row_text(int index, char *buf, int buf_sz, void *ctx)
-{
-    (void)ctx;
-    switch (index) {
-    case SETTINGS_ITEM_WIFI:
-        snprintf(buf, buf_sz, "Wi-Fi: %s", wifi_is_on() ? "On" : "Off");
-        break;
-    case SETTINGS_ITEM_SETUP:
-        snprintf(buf, buf_sz, "Wi-Fi setup");
-        break;
-    default:
-        snprintf(buf, buf_sz, "?");
-        break;
-    }
-}
-
+/* ── the provisioning portal sub-mode ── */
 static void portal_start(void)
 {
     if (!s_portal_up && softap_portal_start() == ESP_OK) {
@@ -98,25 +69,49 @@ static void portal_stop(void)
     wifi_mgr_refresh_status();          /* restore the connectivity indicator */
 }
 
-/* Flip the Wi-Fi master switch: persist WIFI_EN + drive the radio. This is what
- * takes the device (and the task apps) offline/online (§8.3, step 12). */
-static void wifi_toggle(void)
+/* ── settings-table accessors / actions ── */
+static int wifi_get(void)
 {
-    bool turn_on = !wifi_is_on();
-    config_set_u8("wifi_en", turn_on ? 1 : 0);
-    if (turn_on) {
+    uint8_t en = 1;                     /* default on if never set */
+    config_get_u8("wifi_en", &en);
+    return en != 0 ? 1 : 0;
+}
+
+/* Flip the Wi-Fi master switch: persist WIFI_EN + drive the radio. This is what takes
+ * the device (and the task apps) offline/online (§8.3, step 12). */
+static void wifi_set(int on)
+{
+    config_set_u8("wifi_en", on ? 1 : 0);
+    if (on) {
         wifi_mgr_start_sta();           /* CONNECTING → CONNECTED */
     } else {
         wifi_mgr_stop();                /* radio down → NET_WIFI_OFF */
     }
-    ESP_LOGI(TAG, "Wi-Fi %s", turn_on ? "on" : "off");
+    ESP_LOGI(TAG, "Wi-Fi %s", on ? "on" : "off");
 }
 
+static void act_wifi_setup(void)    { portal_start(); }
+static void act_restart(void)       { esp_restart(); }
+static void act_factory_reset(void) { config_factory_reset(); esp_restart(); }
+
+/* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
+ * ENUM/RANGE rows (startup / brightness / timeout) land in the following steps. */
+static const setting_item_t SETTINGS_ITEMS[] = {
+    { .label = "Wi-Fi",         .kind = SETTING_TOGGLE, .get = wifi_get, .set = wifi_set },
+    { .label = "Wi-Fi setup",   .kind = SETTING_ACTION, .action = act_wifi_setup },
+    { .label = "Restart",       .kind = SETTING_ACTION, .action = act_restart,
+      .confirm = "Restart device?" },
+    { .label = "Factory reset", .kind = SETTING_ACTION, .action = act_factory_reset,
+      .confirm = "Erase all settings?" },
+};
+#define SETTINGS_ITEM_COUNT ((int)(sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0])))
+
+/* ── app lifecycle ── */
 static void settings_init(void)
 {
     s_portal_up = false;
-    ui_list_init(&s_list, SETTINGS_LIST_ROWS);
-    ui_list_set_count(&s_list, SETTINGS_ITEM_COUNT);
+    confirm_reset();                    /* never inherit a stale modal */
+    settings_menu_init(&s_menu, SETTINGS_ITEMS, SETTINGS_ITEM_COUNT, SETTINGS_LIST_ROWS);
     if (s_enter_setup) {
         s_enter_setup = false;
         portal_start();                 /* boot provisioning → straight into the portal */
@@ -130,24 +125,20 @@ static void settings_on_event(uint8_t ev)
     if (s_mode == MODE_PORTAL) {
         return;                         /* phone drives provisioning; Home exits */
     }
-    switch (ev) {
-    case EV_ENCODER_CW:  ui_list_move(&s_list, +1); break;
-    case EV_ENCODER_CCW: ui_list_move(&s_list, -1); break;
-    case EV_ENCODER_CLICK:
-    case EV_SELECT:
-        switch (ui_list_sel(&s_list)) {
-        case SETTINGS_ITEM_WIFI:  wifi_toggle();  break;
-        case SETTINGS_ITEM_SETUP: portal_start(); break;
-        default: break;
-        }
-        break;
-    default:
-        break;
+    if (confirm_active()) {             /* the modal gets first refusal */
+        confirm_input(ev);
+        return;
     }
+    settings_menu_input(&s_menu, ev);
 }
 
 static void settings_render(void)
 {
+    if (confirm_active()) {             /* modal owns the screen */
+        confirm_render();
+        return;
+    }
+
     lv_obj_clean(ui_frame_content());
 
     if (s_mode == MODE_PORTAL) {
@@ -161,14 +152,16 @@ static void settings_render(void)
         return;
     }
 
-    ui_frame_set_hints(&SETTINGS_HINTS);
+    ui_frame_set_hints(settings_menu_editing(&s_menu) ? &SETTINGS_HINTS_EDIT
+                                                      : &SETTINGS_HINTS);
     ui_text_row(SETTINGS_TITLE_ROW, "Settings");
-    ui_list_draw(&s_list, SETTINGS_LIST_ROW, settings_row_text, NULL);
+    settings_menu_render(&s_menu, SETTINGS_LIST_ROW);
 }
 
 static void settings_exit(void)
 {
     portal_stop();                      /* idempotent — safe when the portal is down */
+    confirm_reset();
     ESP_LOGI(TAG, "exit");
 }
 
