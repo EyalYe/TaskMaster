@@ -56,7 +56,9 @@ static void ensure_started(void)
 static void retry_cb(void *arg)
 {
     (void)arg;
-    if (s_sta_on) {
+    /* Don't fight the portal: while the AP is up (provisioning), a STA connect
+     * attempt would starve /scan and destabilize the SoftAP — stay idle (§7A). */
+    if (s_sta_on && !s_ap_on) {
         ESP_LOGI(TAG, "reconnecting…");
         esp_wifi_connect();
     }
@@ -79,11 +81,11 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        if (s_sta_on) {
+        if (s_sta_on && !s_ap_on) {
             esp_wifi_connect();              /* connect once the STA iface is up */
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_sta_on) {                          /* ignore if we don't want STA */
+        if (s_sta_on && !s_ap_on) {              /* not while we don't want STA / portal up */
             wifi_event_sta_disconnected_t *d = (wifi_event_sta_disconnected_t *)data;
             ESP_LOGW(TAG, "disconnected (reason %d)", d ? d->reason : -1);
             net_status_set(NET_DISCONNECTED, 0);
@@ -188,13 +190,23 @@ void wifi_mgr_ap_start(const char *ssid)
     ap.ap.authmode       = WIFI_AUTH_OPEN;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     ensure_started();
-    ESP_LOGI(TAG, "AP up (ssid '%s', mode AP+STA)", ssid);
+    /* Halt any in-flight STA connect + its retry timer so the radio is free to host
+     * the AP and run /scan (the STA iface stays up in AP+STA, just idle). */
+    if (s_retry_timer) {
+        esp_timer_stop(s_retry_timer);
+    }
+    esp_wifi_disconnect();                          /* harmless if not connected */
+    ESP_LOGI(TAG, "AP up (ssid '%s', mode AP+STA, STA idle)", ssid);
 }
 
 void wifi_mgr_ap_stop(void)
 {
     s_ap_on = false;
     set_mode_for_wants();                          /* → STA-only or idle */
+    if (s_sta_on) {                                /* resume the STA link we paused */
+        s_retry = 0;
+        esp_wifi_connect();
+    }
     ESP_LOGI(TAG, "AP down");
 }
 

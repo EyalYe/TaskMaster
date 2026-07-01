@@ -103,11 +103,14 @@ static esp_err_t scan_get(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
 
     wifi_scan_config_t sc = {0};
-    if (esp_wifi_scan_start(&sc, true) != ESP_OK) {    /* blocking scan (APSTA) */
+    esp_err_t serr = esp_wifi_scan_start(&sc, true);   /* blocking scan (APSTA) */
+    if (serr != ESP_OK) {
+        ESP_LOGW(TAG, "scan start failed: %s", esp_err_to_name(serr));
         return httpd_resp_sendstr(req, "[]");
     }
     uint16_t num = 0;
     esp_wifi_scan_get_ap_num(&num);
+    ESP_LOGI(TAG, "scan: %u APs found", (unsigned)num);
     if (num > 20) {
         num = 20;
     }
