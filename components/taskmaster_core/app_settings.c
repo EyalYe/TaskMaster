@@ -55,7 +55,11 @@ static const char *TAG = "app.settings";
 #define INFO_LINE_MAX       40   /* fits "SSID: " / "FW: " + a 32-char value; long lines scroll */
 #define INFO_SSID_MAX       33
 
-typedef enum { MODE_MENU, MODE_PORTAL, MODE_INFO } settings_mode_t;
+/* Delete-data sub-screen. */
+#define DEL_MAX_TARGETS     16   /* "Wi-Fi" + each app config group */
+#define DEL_PROMPT_MAX      32
+
+typedef enum { MODE_MENU, MODE_PORTAL, MODE_INFO, MODE_DELETE } settings_mode_t;
 
 /* SEL when navigating; OK when editing a value or in a confirm dialog; BAK on the
  * read-only info screen. */
@@ -72,6 +76,14 @@ static settings_menu_t s_menu;
 static char       s_info[INFO_MAX_LINES][INFO_LINE_MAX];
 static int        s_info_n;
 static ui_list_t  s_info_list;
+
+/* Delete-data targets: "Wi-Fi" (ns == NULL) + one per app config group (ns set). */
+typedef struct { const char *label; const char *ns; } del_target_t;
+static del_target_t s_del[DEL_MAX_TARGETS];
+static int          s_del_n;
+static int          s_del_sel;                 /* target awaiting confirm */
+static ui_list_t    s_del_list;
+static char         s_del_prompt[DEL_PROMPT_MAX];
 
 /* ── the provisioning portal sub-mode ── */
 static void portal_start(void)
@@ -326,16 +338,68 @@ static void app_knob_set(void *ctx, int val)
     }
 }
 
+/* ── delete-data sub-screen: wipe one app's stored config, or Wi-Fi credentials ── */
+static void del_row_text(int i, char *buf, int buf_sz, void *ctx)
+{
+    (void)ctx;
+    snprintf(buf, buf_sz, "%s", (i >= 0 && i < s_del_n) ? s_del[i].label : "");
+}
+
+/* "Wi-Fi" + one entry per app config group (§9.4 — core names no app). */
+static void del_build_targets(void)
+{
+    s_del_n = 0;
+    s_del[s_del_n++] = (del_target_t){ .label = "Wi-Fi", .ns = NULL };
+    for (unsigned g = 0; g < app_config_group_count() && s_del_n < DEL_MAX_TARGETS; g++) {
+        const app_cfg_group_t *grp = app_config_group(g);
+        s_del[s_del_n++] = (del_target_t){ .label = grp->name, .ns = grp->ns };
+    }
+}
+
+static void del_confirm_cb(bool yes, void *ctx)
+{
+    (void)ctx;
+    if (!yes || s_del_sel < 0 || s_del_sel >= s_del_n) {
+        return;
+    }
+    const del_target_t *t = &s_del[s_del_sel];
+    if (t->ns == NULL) {
+        /* Wi-Fi: clear creds + un-provision + drop the link → next boot = Wi-Fi setup. */
+        config_set_str("wifi_ssid", "");
+        config_set_str("wifi_psk", "");
+        config_set_provisioned(false);
+        wifi_mgr_stop();
+        ESP_LOGW(TAG, "deleted Wi-Fi credentials");
+    } else {
+        /* App: erase its whole app_store namespace (tokens/URLs/knobs). */
+        app_store_t st;
+        if (app_store_open(&st, t->ns) == ESP_OK) {
+            app_store_erase_all(&st);
+            app_store_close(&st);
+        }
+        ESP_LOGW(TAG, "deleted '%s' data", t->label);
+    }
+}
+
+static void act_delete_creds(void *ctx)
+{
+    (void)ctx;
+    del_build_targets();
+    ui_list_init(&s_del_list, UI_ROWS - 1);    /* below the title */
+    ui_list_set_count(&s_del_list, s_del_n);
+    s_mode = MODE_DELETE;
+}
+
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
  * Indexed so a row's runtime bits (e.g. dynamic ENUM choices) can be filled in init. */
 enum {
-    SI_WIFI, SI_WIFI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_TIMEOUT,
-    SI_DEEPSLEEP, SI_RESTART, SI_FACTORY, SI_COUNT
+    SI_WIFI, SI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_TIMEOUT,
+    SI_DEEPSLEEP, SI_DELETE, SI_RESTART, SI_FACTORY, SI_COUNT
 };
 static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_WIFI]        = { .label = "Wi-Fi",       .kind = SETTING_TOGGLE,
                          .get = wifi_get, .set = wifi_set },
-    [SI_WIFI_SETUP]  = { .label = "Wi-Fi setup", .kind = SETTING_ACTION,
+    [SI_SETUP]       = { .label = "Setup",       .kind = SETTING_ACTION,
                          .action = act_wifi_setup },
     [SI_DEVICE_INFO] = { .label = "Device info", .kind = SETTING_ACTION,
                          .action = act_device_info },
@@ -349,6 +413,8 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
                          .choices = TIMEOUT_LABELS, .choice_count = TIMEOUT_COUNT },
     [SI_DEEPSLEEP]   = { .label = "Deep sleep",  .kind = SETTING_TOGGLE,
                          .get = deep_sleep_get, .set = deep_sleep_set },
+    [SI_DELETE]      = { .label = "Delete data", .kind = SETTING_ACTION,
+                         .action = act_delete_creds },
     [SI_RESTART]     = { .label = "Restart",     .kind = SETTING_ACTION,
                          .action = act_restart,  .confirm = "Restart device?" },
     [SI_FACTORY]     = { .label = "Factory reset", .kind = SETTING_ACTION,
@@ -356,19 +422,15 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
 };
 /* Live rows = the core template above + one appended row per app ACFG_KNOB field. */
 #define MAX_APP_KNOBS     16
-#define MAX_APP_ROWS      24        /* knob rows + one "setup" row per app */
-#define APP_LABEL_MAX     20        /* "<app> setup" */
-#define SETTINGS_MAX_ROWS (SI_COUNT + MAX_APP_ROWS)
+#define SETTINGS_MAX_ROWS (SI_COUNT + MAX_APP_KNOBS)
 
 static setting_item_t s_rows[SETTINGS_MAX_ROWS];
 static int            s_row_count;
 static app_knob_ctx_t s_knob_ctx[MAX_APP_KNOBS];
-static char           s_app_labels[MAX_APP_ROWS][APP_LABEL_MAX];
-static int            s_label_n;
 
 /* Build the live rows: copy the core template, wire the dynamic startup choices, then
- * append per app (§9.4, core names no app): its ACFG_KNOB fields as editable rows, and
- * — if it has any ACFG_PASTE field — an "<app> setup" action that opens the form. */
+ * append each installed app's ACFG_KNOB fields as editable rows (§9.4 — core names no
+ * app). Paste config (URLs/tokens) is set via "Setup" and wiped via "Delete data". */
 static void settings_build_rows(void)
 {
     memcpy(s_rows, SETTINGS_ITEMS, sizeof(SETTINGS_ITEMS));
@@ -377,18 +439,12 @@ static void settings_build_rows(void)
     s_rows[SI_STARTUP].choice_count = s_startup_count;
 
     int kc = 0;
-    s_label_n = 0;
     for (unsigned g = 0; g < app_config_group_count() && s_row_count < SETTINGS_MAX_ROWS; g++) {
         const app_cfg_group_t *grp = app_config_group(g);
-        bool has_paste = false;
-        for (unsigned k = 0; k < grp->count && s_row_count < SETTINGS_MAX_ROWS; k++) {
+        for (unsigned k = 0; k < grp->count && s_row_count < SETTINGS_MAX_ROWS && kc < MAX_APP_KNOBS; k++) {
             const app_cfg_field_t *f = &grp->fields[k];
-            if (f->input == ACFG_PASTE) {
-                has_paste = true;
-                continue;               /* pasted via the form, not knob-edited */
-            }
-            if (f->input != ACFG_KNOB || kc >= MAX_APP_KNOBS) {
-                continue;
+            if (f->input != ACFG_KNOB) {
+                continue;               /* paste config → Setup / Delete data, not a knob */
             }
             s_knob_ctx[kc] = (app_knob_ctx_t){ .ns = grp->ns, .f = f };
             setting_item_t *row = &s_rows[s_row_count++];
@@ -405,16 +461,6 @@ static void settings_build_rows(void)
                 row->max  = (int)f->max;
                 row->step = 1;
             }
-        }
-        /* Paste-only config (URLs/tokens) isn't knob-editable — give the app a
-         * discoverable "setup" entry that re-opens the provisioning form. */
-        if (has_paste && s_row_count < SETTINGS_MAX_ROWS && s_label_n < MAX_APP_ROWS) {
-            snprintf(s_app_labels[s_label_n], APP_LABEL_MAX, "%s setup", grp->name);
-            setting_item_t *row = &s_rows[s_row_count++];
-            memset(row, 0, sizeof(*row));
-            row->label  = s_app_labels[s_label_n++];
-            row->kind   = SETTING_ACTION;
-            row->action = act_wifi_setup;   /* opens the paste-from-phone portal */
         }
     }
 }
@@ -440,6 +486,10 @@ static void settings_on_event(uint8_t ev)
     if (s_mode == MODE_PORTAL) {
         return;                         /* phone drives provisioning; Home exits */
     }
+    if (confirm_active()) {             /* the modal gets first refusal, in any mode */
+        confirm_input(ev);
+        return;
+    }
     if (s_mode == MODE_INFO) {          /* read-only: scroll, any click → back */
         switch (ev) {
         case EV_ENCODER_CW:  ui_list_move(&s_info_list, +1); break;
@@ -450,8 +500,19 @@ static void settings_on_event(uint8_t ev)
         }
         return;
     }
-    if (confirm_active()) {             /* the modal gets first refusal */
-        confirm_input(ev);
+    if (s_mode == MODE_DELETE) {        /* pick a target → confirm → wipe */
+        switch (ev) {
+        case EV_ENCODER_CW:  ui_list_move(&s_del_list, +1); break;
+        case EV_ENCODER_CCW: ui_list_move(&s_del_list, -1); break;
+        case EV_ENCODER_CLICK:
+        case EV_SELECT:
+            s_del_sel = ui_list_sel(&s_del_list);
+            snprintf(s_del_prompt, sizeof(s_del_prompt), "Delete %s data?",
+                     s_del[s_del_sel].label);
+            confirm_open(s_del_prompt, del_confirm_cb, NULL);
+            break;
+        default: break;
+        }
         return;
     }
     settings_menu_input(&s_menu, ev);
@@ -469,6 +530,13 @@ static void settings_render(void)
     if (s_mode == MODE_INFO) {
         ui_frame_set_hints(&SETTINGS_HINTS_INFO);
         ui_list_draw(&s_info_list, 0, info_row_text, NULL);
+        return;
+    }
+
+    if (s_mode == MODE_DELETE) {
+        ui_frame_set_hints(&SETTINGS_HINTS);
+        ui_text_row(SETTINGS_TITLE_ROW, "Delete data");
+        ui_list_draw(&s_del_list, SETTINGS_LIST_ROW, del_row_text, NULL);
         return;
     }
 
