@@ -885,8 +885,10 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
       buffers the body but drops cJSON's node overhead; a true chunked SAX pass keeps memory flat — pick
       per measured headroom at build time.) **Fallback:** the `~/yapplocal`-style proxy stays a
       documented escape hatch if a real account proves too heavy to parse on-device.
-12. **Offline + write semantics.** ✅ **Done (built; on-hardware verification pending the Settings
-    Wi-Fi toggle).** `WIFI_EN=0` / dropped link → render **cached** `task_t[]` + an `OFFLINE` marker,
+12. **Offline + write semantics.** ✅ **Done + verified on hardware** (via the Settings Wi-Fi toggle:
+    Wi-Fi off → Yapp shows cached list + OFFLINE banner + `OFF` hint; Select queued the close
+    (`OFFLINE 1 queued`); Wi-Fi on → on reopen it replayed `close … ok=1 status=204` and re-synced).
+    `WIFI_EN=0` / dropped link → render **cached** `task_t[]` + an `OFFLINE` marker,
     "Sync now" unavailable, writes **queued** (bounded) to replay on reconnect — one path for both
     off-by-toggle and dropped (§8.3). Each app owns its cache (userspace).
     - **Shared in `tasks.h`** (both apps, header-only, identical copies): an NVS-blob **cache** of the
@@ -901,9 +903,10 @@ Steps 5/6/6.5 are **done** but partly superseded by the restructure — see 5★
       `render()` detects the offline→online edge and drains the queue via **chained close/complete
       jobs** (`async_job`), then re-syncs — no extra task or timer. A failed replay is left queued and
       retried on the next reconnect (no server hammering; poison-entry handling deferred to step 13).
-    - **Verification unblocked:** the Settings app's **Wi-Fi: On/Off** toggle (§7A.4, built) is the
-      in-UI way to go offline — toggle off, open a task app (offline banner + cached list + `OFF`
-      hint), complete a task (queued), toggle Wi-Fi on → the app replays on reconnect and re-syncs.
+    - **Verified** via the Settings app's **Wi-Fi: On/Off** toggle (§7A.4): toggle off → offline banner
+      + cached list + `OFF` hint; complete → queued; toggle Wi-Fi on → replay `close … ok=1 status=204`
+      then re-sync. (A replay that can't reach its server — e.g. the Local LAN server from a foreign
+      network — stays queued and retries on the next reconnect, as designed.)
 13. **Harden + §6A.4 gate.** Bounded buffers, capped task count, source-down → error over cached data;
     run the leak harness on each source app incl. **Home fired mid-fetch** — now the real case, since
     `async_job_cancel()` on `exit()` is exactly what prevents the worker writing into freed memory.
