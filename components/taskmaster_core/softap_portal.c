@@ -53,11 +53,22 @@ static esp_err_t form_get(httpd_req_t *req)
             continue;
         }
         const char *type = f->secret ? "password" : "text";
-        const char *list = (strcmp(f->key, "wifi_ssid") == 0) ? " list=aps" : "";
+        bool is_ssid = (strcmp(f->key, "wifi_ssid") == 0);
+        const char *extra = is_ssid ? " list=aps id=ssid" : "";
         snprintf(row, sizeof(row),
             "<label>%s<br><input name=%s type=%s maxlength=%u%s %s></label><br><br>",
-            f->label, f->key, type, f->max_len, list, INPUT_STYLE);
+            f->label, f->key, type, f->max_len, extra, INPUT_STYLE);
         httpd_resp_sendstr_chunk(req, row);
+        if (is_ssid) {
+            /* A visible dropdown of scanned networks (the <datalist> above is
+             * invisible on some desktop browsers, e.g. macOS). Picking one fills the
+             * SSID field; the field stays editable for hidden/manual SSIDs. */
+            httpd_resp_sendstr_chunk(req,
+                "<label>Scanned networks (2.4GHz)<br>"
+                "<select id=apsel style=\"width:100%;box-sizing:border-box\">"
+                "<option value=\"\">&mdash; scanning&hellip; &mdash;</option>"
+                "</select></label><br><br>");
+        }
     }
 
     /* App sections: each installed app's ACFG_PASTE fields (core names no app). */
@@ -89,9 +100,18 @@ static esp_err_t form_get(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req,
         "<datalist id=aps></datalist>"
         "<button type=submit style=\"padding:.6em 1.2em\">Save &amp; Connect</button></form>"
-        "<script>fetch('/scan').then(r=>r.json()).then(a=>{var d=document.getElementById('aps');"
-        "a.forEach(function(s){var o=document.createElement('option');o.value=s;d.appendChild(o);});})"
-        ".catch(function(e){});</script>"
+        "<script>fetch('/scan').then(function(r){return r.json();}).then(function(a){"
+        "var d=document.getElementById('aps');"
+        "var sel=document.getElementById('apsel');"
+        "if(sel){sel.innerHTML='';var def=document.createElement('option');def.value='';"
+        "def.textContent=a.length?'\\u2014 pick a network \\u2014':'\\u2014 none found \\u2014';"
+        "sel.appendChild(def);}"
+        "a.forEach(function(s){"
+        "if(d){var o=document.createElement('option');o.value=s;d.appendChild(o);}"
+        "if(sel){var o2=document.createElement('option');o2.value=s;o2.textContent=s;sel.appendChild(o2);}"
+        "});"
+        "if(sel){sel.onchange=function(){var i=document.getElementById('ssid');if(i){i.value=sel.value;}};}"
+        "}).catch(function(e){});</script>"
         "</body></html>");
     httpd_resp_sendstr_chunk(req, NULL);   /* end of chunks */
     return ESP_OK;
