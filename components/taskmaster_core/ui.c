@@ -118,6 +118,16 @@ static void ui_task(void *arg)
          * pump LVGL — just wait for the wake press (§8A). */
         uint32_t next;
         if (s_blanked) {
+            /* Stage 2 (§8A): if deep sleep is enabled, halt in light sleep until a
+             * pin wakes us — the woken press is then read by the input task and
+             * delivered below (wakes the screen). Else just idle-poll (Stage 1). */
+            uint8_t deep = 0;
+            config_get_u8("deep_sleep", &deep);
+            if (deep) {
+                ESP_LOGI(TAG, "light sleep");
+                input_light_sleep();
+                ESP_LOGI(TAG, "woke");
+            }
             next = UI_BLANK_POLL_MS;
         } else {
             next = lvgl_disp_tick();

@@ -3,6 +3,7 @@
 
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "esp_sleep.h"
 #include "esp_log.h"
 
 static const char *TAG = "input";
@@ -80,6 +81,25 @@ static void input_task(void *arg)
         }
 
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+    }
+}
+
+/* All input pins: rest HIGH (pull-ups; encoder detent = A,B both high, §4.3), so a
+ * press or a turn drives one LOW — a valid light-sleep wake trigger (§8A step 5). */
+static const gpio_num_t s_wake_pins[] = {
+    PIN_ENC_A, PIN_ENC_B, PIN_ENC_SW, PIN_BTN_SELECT, PIN_BTN_HOME,
+};
+#define NUM_WAKE_PINS (sizeof(s_wake_pins) / sizeof(s_wake_pins[0]))
+
+void input_light_sleep(void)
+{
+    for (size_t i = 0; i < NUM_WAKE_PINS; i++) {
+        gpio_wakeup_enable(s_wake_pins[i], GPIO_INTR_LOW_LEVEL);
+    }
+    esp_sleep_enable_gpio_wakeup();
+    esp_light_sleep_start();                 /* halts the CPU until a pin goes LOW */
+    for (size_t i = 0; i < NUM_WAKE_PINS; i++) {
+        gpio_wakeup_disable(s_wake_pins[i]); /* back to normal polling */
     }
 }
 

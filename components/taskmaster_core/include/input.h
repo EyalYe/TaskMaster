@@ -34,3 +34,7 @@ bool input_home_held(void);
 
 /* Human-readable name for logging / on-screen display. */
 const char *input_event_name(input_event_t ev);
+
+/* Enter light sleep until any input pin goes LOW (a press or encoder turn), then
+ * return. Called by the UI task on idle when deep sleep is enabled (§8A step 5). */
+void input_light_sleep(void);

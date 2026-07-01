@@ -274,11 +274,24 @@ static void timeout_set(int idx)
     config_set_u16("idle_to_s", TIMEOUT_SECS[idx]);
 }
 
+/* ── deep sleep (TOGGLE): when on, idle → light sleep (Stage 2, ui.c) ── */
+static int deep_sleep_get(void)
+{
+    uint8_t v = 0;
+    config_get_u8("deep_sleep", &v);
+    return v != 0 ? 1 : 0;
+}
+
+static void deep_sleep_set(int on)
+{
+    config_set_u8("deep_sleep", on ? 1 : 0);
+}
+
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
  * Indexed so a row's runtime bits (e.g. dynamic ENUM choices) can be filled in init. */
 enum {
     SI_WIFI, SI_WIFI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_TIMEOUT,
-    SI_RESTART, SI_FACTORY, SI_COUNT
+    SI_DEEPSLEEP, SI_RESTART, SI_FACTORY, SI_COUNT
 };
 static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_WIFI]        = { .label = "Wi-Fi",       .kind = SETTING_TOGGLE,
@@ -295,6 +308,8 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_TIMEOUT]     = { .label = "Timeout",     .kind = SETTING_ENUM,
                          .get = timeout_get, .set = timeout_set,
                          .choices = TIMEOUT_LABELS, .choice_count = TIMEOUT_COUNT },
+    [SI_DEEPSLEEP]   = { .label = "Deep sleep",  .kind = SETTING_TOGGLE,
+                         .get = deep_sleep_get, .set = deep_sleep_set },
     [SI_RESTART]     = { .label = "Restart",     .kind = SETTING_ACTION,
                          .action = act_restart,  .confirm = "Restart device?" },
     [SI_FACTORY]     = { .label = "Factory reset", .kind = SETTING_ACTION,
