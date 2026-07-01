@@ -375,21 +375,24 @@ weather). Verify each step on hardware.
 1. **Glyph hint bar.** Convert the `icons/` SVGs → **1-bit LVGL glyphs** sized for the 20 px hint boxes;
    render them in the Home / encoder / Select cells. `control_hints_t` is **unchanged** — a label maps
    to a glyph where one exists, else falls back to the ≤3-char text (so apps needn't change).
-2. **NTP time (core service).** `esp_sntp` synced at a sensible interval once online; a small core API
-   for the current local time. Timezone comes from the city (step 4) so the time is correct.
-3. **City config.** A city entered at provisioning — a **core** `nvs_config` field (it drives core
-   time/weather, not an app), collected in the Setup form. Empty city → no time/weather.
-4. **Weather + timezone.** Two API calls keyed by the city (timezone so NTP shows local time; weather
-   for the bar), run via `async_job`. **Decide:** provider/API + key handling + refresh cadence.
+   *Independent, immediately visible.* → hint boxes show icons.
+2. **NTP time (core service).** `esp_sntp` syncs **UTC** once online at a sensible cadence; a small core
+   API (`time_now()` / a formatted string). *No UI yet* → verify the sync in a log / a temp readout.
+3. **City config.** A **core** `nvs_config` field `city` (it drives core time/weather, not an app),
+   collected in the Setup form. → set a city, persists; empty → no time/weather.
+4. **Weather (one API — gives the timezone too).** An `async_job` calls a weather provider keyed by
+   `city`; the response carries **current weather *and* the timezone offset** (e.g. OpenWeatherMap
+   returns `timezone`), so **local time = NTP UTC + offset** — no separate timezone API. Cache both;
+   refresh on a cadence. **Decide:** provider + API-key handling + refresh interval.
 5. **Launcher status bar.** A top strip on the **Launcher only** (apps unaffected): connectivity glyph +
-   time + weather — shown only when **online + city set**; offline / Wi-Fi-off / no-city → today's plain
-   list.
+   local time + weather — shown **only when online + city set**; offline / Wi-Fi-off / no-city → today's
+   plain list. Composes steps 2+4.
 6. **Cohesion pass.** Consistent glyphs/hints across Launcher + Settings + task apps; graceful
    API-error / Wi-Fi-loss screens; tidy loose ends so core feels finished.
 
-**Open decisions (settle at build time):** weather/timezone provider (+ API-key story); refresh
-cadences; the glyph asset pipeline (SVG → LVGL C array); whether the status bar ever shows outside the
-Launcher.
+**Dependencies:** 1 is standalone; 5 needs 2 + 4; 4 needs 3; 6 is last. **Open decisions (settle at
+build time):** weather provider (+ API-key story) + refresh cadence; the glyph asset pipeline (SVG →
+LVGL C array); whether the status bar ever shows outside the Launcher.
 
 ### 6D. Zero-toolchain onboarding (Phase 6) — CI build + web flash + OTA
 
