@@ -1042,9 +1042,13 @@ wiring UI + behavior onto them.)
      **1 ms input poll converted to interrupt / GPIO-wake** (§4.6 deferral) so the CPU can idle
      continuously. Manual light sleep here is opt-in (default off), so normal use is unaffected; revisit
      with real battery hardware.
-6. **Per-app config in Settings** — the editor iterates the `app_config` groups (§9.4): `ACFG_KNOB`
-   scalars knob-editable, `ACFG_PASTE` strings shown masked with a **re-provision** shortcut that opens
-   the form. Falls out of step 0.
+6. **Per-app config in Settings. ✅ Done.** The editor's get/set/action gained a per-row `void *ctx`;
+   `app_settings` builds live rows = core template + one appended row per app **`ACFG_KNOB`** field
+   (§9.4), whose get/set read/write the app's own `app_store` namespace via a `{ns,field}` ctx
+   (`ACFG_BOOL`→TOGGLE, numeric→RANGE with the field's min/max) — **core names no app**. `ACFG_PASTE`
+   stays form-only (Wi-Fi setup re-opens it). Demonstrated: `app_hello` declares an `ACFG_KNOB` "step"
+   (1–10) knob-edited in Settings and used by the app. *(Masked-PASTE-with-re-provision-per-app is
+   redundant with Wi-Fi setup on this screen, so it's omitted.)*
 7. **OTA update (Phase 4.5).** Stub / "coming soon" until then; the real path pulls a signed image from
    `fw_url` via `esp_https_ota` with rollback (§9).
 
