@@ -1032,10 +1032,16 @@ wiring UI + behavior onto them.)
    UI task tracks last user-input time and after the timeout **blanks the panel** (`sh1106_display_power`
    off, RAM retained) + stops pumping LVGL; the next **user** press wakes it (consumed). System events
    (net/job) don't wake or reset idle, and job-done still delivers while blanked. (Stage 2 = step 5.)
-5. **Deep-sleep toggle + light sleep.** First convert input from the **1 ms poll → interrupt /
-   GPIO-wake** (the one foundational change, §4.6 deferral), then **Stage 2**: `esp_light_sleep` /
-   `esp_pm` with encoder + Select/Home as wake sources. Labelled "deep sleep," light sleep under the
-   hood first (§8A).
+5. **Deep-sleep toggle + light sleep. ✅ Done (first cut, USB).** Settings **Deep sleep** TOGGLE; when
+   on, idle + blanked (step 4) → `input_light_sleep()`: GPIO-wake on all input pins (rest HIGH → a
+   press/turn drives one LOW) + `esp_light_sleep_start()`; the woken press is read by the input task and
+   wakes the screen. **Verified on hardware** (enters at the timeout, wakes on a press — the OLED is the
+   witness; native USB serial drops during light sleep, so it can't log the wake). Stable entry (encoder
+   rests high, no wake-thrash).
+   - **Deferred (battery-grade):** full **Wi-Fi-retained *automatic* light sleep** via `esp_pm` needs the
+     **1 ms input poll converted to interrupt / GPIO-wake** (§4.6 deferral) so the CPU can idle
+     continuously. Manual light sleep here is opt-in (default off), so normal use is unaffected; revisit
+     with real battery hardware.
 6. **Per-app config in Settings** — the editor iterates the `app_config` groups (§9.4): `ACFG_KNOB`
    scalars knob-editable, `ACFG_PASTE` strings shown masked with a **re-provision** shortcut that opens
    the form. Falls out of step 0.
