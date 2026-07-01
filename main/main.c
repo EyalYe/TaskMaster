@@ -40,6 +40,7 @@ void app_main(void)
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");
     }
     lvgl_disp_init();   /* LVGL on the panel (via the sh1106 framebuffer); the UI task pumps it */
+    app_settings_apply_brightness();   /* restore the saved OLED brightness (§8A) */
 
     /* Register core apps (non-removable). User apps self-registered via their
      * constructors before app_main; core apps are owned by the core. */

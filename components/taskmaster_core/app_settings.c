@@ -19,6 +19,7 @@
 #include "net_status.h"
 #include "nvs_config.h"
 #include "app_manager.h"
+#include "sh1106.h"
 #include "ui_frame.h"
 #include "ui_list.h"
 #include "settings_menu.h"
@@ -216,10 +217,43 @@ static void startup_set(int idx)
                    (idx > 0 && idx < s_startup_count) ? s_startup_choices[idx] : "");
 }
 
+/* ── OLED brightness (RANGE, stored as a 0..100% level → SH1106 contrast) ── */
+#define BRIGHT_MIN   10
+#define BRIGHT_MAX   100
+#define BRIGHT_STEP  10
+#define BRIGHT_FULL  255   /* contrast register range 0..255 */
+
+static void bright_apply(int pct)
+{
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    sh1106_set_contrast((uint8_t)(pct * BRIGHT_FULL / 100));
+}
+
+static int bright_get(void)
+{
+    uint8_t p = BRIGHT_MAX;
+    config_get_u8("bright", &p);
+    return p;
+}
+
+static void bright_set(int pct)
+{
+    config_set_u8("bright", (uint8_t)pct);
+    bright_apply(pct);                  /* live */
+}
+
+/* Apply the saved brightness at boot (called from main after the panel is up). */
+void app_settings_apply_brightness(void)
+{
+    bright_apply(bright_get());
+}
+
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
  * Indexed so a row's runtime bits (e.g. dynamic ENUM choices) can be filled in init. */
 enum {
-    SI_WIFI, SI_WIFI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_RESTART, SI_FACTORY, SI_COUNT
+    SI_WIFI, SI_WIFI_SETUP, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT,
+    SI_RESTART, SI_FACTORY, SI_COUNT
 };
 static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_WIFI]        = { .label = "Wi-Fi",       .kind = SETTING_TOGGLE,
@@ -230,6 +264,9 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
                          .action = act_device_info },
     [SI_STARTUP]     = { .label = "Startup",     .kind = SETTING_ENUM,
                          .get = startup_get, .set = startup_set },  /* choices set in init */
+    [SI_BRIGHT]      = { .label = "Brightness",  .kind = SETTING_RANGE,
+                         .get = bright_get, .set = bright_set,
+                         .min = BRIGHT_MIN, .max = BRIGHT_MAX, .step = BRIGHT_STEP, .unit = "%" },
     [SI_RESTART]     = { .label = "Restart",     .kind = SETTING_ACTION,
                          .action = act_restart,  .confirm = "Restart device?" },
     [SI_FACTORY]     = { .label = "Factory reset", .kind = SETTING_ACTION,

@@ -19,3 +19,6 @@ const device_app_t *app_settings_get(void);
 /* Ask the next init() to open straight into the Wi-Fi-setup portal (used by the
  * boot-mode branch when unprovisioned or Home-held at boot). */
 void app_settings_enter_setup(void);
+
+/* Apply the saved OLED brightness (§8A) — call once at boot after the panel is up. */
+void app_settings_apply_brightness(void);

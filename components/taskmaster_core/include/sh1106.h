@@ -15,6 +15,9 @@
 /* Bring up I2C + the panel. Returns ESP_OK on success. */
 esp_err_t sh1106_init(void);
 
+/* Set panel brightness via the contrast register (0x00 dim … 0xFF bright). */
+esp_err_t sh1106_set_contrast(uint8_t contrast);
+
 /* Framebuffer ops (call sh1106_flush() to push to the panel). */
 void sh1106_clear(void);
 void sh1106_pixel(int x, int y, int on);
