@@ -82,6 +82,10 @@ need a mutex for your own state. Key rules:
   regardless of how far it got, because **Home can fire at any moment** (see §3).
 - **Render is on-demand**, not a frame loop: the platform calls `render()` after each input event and
   whenever platform status you display changes (see §5). Draw from your current state each time.
+- **Need a live-updating screen** (clock, countdown, animation)? Set `.tick_ms` in your `device_app_t`
+  (**app-API 1.1**) — the OS re-renders you every `tick_ms` ms while you're active. Compute time-based
+  state from a timestamp (`esp_timer_get_time()`), **not** a tick counter: the tick pauses while the
+  panel is blanked, so counting ticks would drift.
 
 ## 3. Input events (`on_event`)
 

@@ -21,7 +21,7 @@
  * Settings → Device info. Bump MAJOR for a breaking change, MINOR for a
  * backward-compatible addition. Core and apps thus version independently. */
 #define TM_API_VERSION_MAJOR 1
-#define TM_API_VERSION_MINOR 0
+#define TM_API_VERSION_MINOR 1
 
 /* Drop this at file scope in your app to require an app-API version. Compatible =
  * same MAJOR and at least the requested MINOR. A mismatch is a compile error. */
@@ -41,6 +41,11 @@ typedef struct device_app {
      * Called from the Launcher while the app is NOT active, so read config directly
      * (e.g. app_store) — do not assume init() has run. */
     bool (*available)(void);
+    /* Optional (app-API 1.1): if > 0, the OS re-renders this app every tick_ms
+     * milliseconds while it is active — for clocks, timers, animations. 0 = render
+     * only on input / status change (the default). The tick pauses while the panel is
+     * blanked, so compute time-based state from a timestamp, not a tick counter. */
+    uint32_t tick_ms;
 } device_app_t;
 
 /* Implemented by taskmaster_core; called by an app's registration constructor. */

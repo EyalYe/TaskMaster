@@ -30,6 +30,7 @@ static const device_app_t *s_initial_app;   /* boot app, NULL = Launcher */
  * the next user press wakes it (and is consumed). System events don't count as input. */
 static uint32_t s_last_input_ms;
 static uint32_t s_last_launcher_ms;  /* last periodic Launcher re-render (status-bar clock) */
+static uint32_t s_last_app_tick_ms;  /* last periodic active-app re-render (app.tick_ms, API 1.1) */
 static bool     s_blanked;
 static bool     s_sleep_inhibited;   /* true while OTA (etc.) must keep the CPU + panel up */
 
@@ -147,6 +148,14 @@ static void ui_task(void *arg)
                 now_ms() - s_last_launcher_ms >= UI_LAUNCHER_TICK_MS) {
                 launcher_render();
                 s_last_launcher_ms = now_ms();
+            } else if (mode == MODE_APP && !s_blanked) {
+                /* Periodic re-render for an app that asked for one (app.tick_ms, API 1.1). */
+                const device_app_t *a = app_manager_active();
+                if (a && a->tick_ms && a->render &&
+                    now_ms() - s_last_app_tick_ms >= a->tick_ms) {
+                    a->render();
+                    s_last_app_tick_ms = now_ms();
+                }
             }
             continue;
         }
