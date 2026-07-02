@@ -71,3 +71,12 @@ esp_err_t app_store_set_blob(app_store_t *st, const char *key, const void *val, 
 /* Housekeeping for your namespace. */
 esp_err_t app_store_erase_key(app_store_t *st, const char *key);
 esp_err_t app_store_erase_all(app_store_t *st);
+
+/* ── namespace registry (core use) ──────────────────────────────────────────
+ * app_store records every namespace it creates, so stored data can be listed and
+ * deleted even after the app that created it is uninstalled (Settings → Delete data).
+ * Not for app use. */
+void      app_store_seed_registry(void);                   /* add existing NVS app namespaces */
+int       app_store_ns_count(void);                        /* number of known namespaces */
+esp_err_t app_store_ns_get(int idx, char *out, size_t out_len);  /* the idx-th namespace */
+esp_err_t app_store_erase_ns(const char *ns);              /* wipe its data + forget it */

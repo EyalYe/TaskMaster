@@ -43,6 +43,47 @@ static void hash_namespace(const char *id, char out[16])
     out[j] = '\0';
 }
 
+/* ── namespace registry ─────────────────────────────────────────────────────
+ * Every namespace app_store creates is recorded (a blob in the core-config
+ * namespace), so its data can be listed + deleted even after the app that made it is
+ * uninstalled. Kept in core config because it must outlive any single app. */
+#define REG_KEY     "app_ns"   /* registry blob key in CORE_NS */
+#define REG_NS_LEN  16         /* per entry: 15-char namespace + NUL */
+#define REG_MAX     24         /* max tracked namespaces */
+
+static int reg_load(char *buf)   /* buf holds REG_MAX*REG_NS_LEN; returns the count */
+{
+    nvs_handle_t h;
+    if (nvs_open(CORE_NS, NVS_READWRITE, &h) != ESP_OK) return 0;
+    size_t len = (size_t)REG_MAX * REG_NS_LEN;
+    memset(buf, 0, len);
+    esp_err_t e = nvs_get_blob(h, REG_KEY, buf, &len);
+    nvs_close(h);
+    return (e == ESP_OK) ? (int)(len / REG_NS_LEN) : 0;
+}
+
+static void reg_save(const char *buf, int count)
+{
+    nvs_handle_t h;
+    if (nvs_open(CORE_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (count <= 0) nvs_erase_key(h, REG_KEY);
+    else            nvs_set_blob(h, REG_KEY, buf, (size_t)count * REG_NS_LEN);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void reg_add(const char *ns)   /* record `ns` if not already known */
+{
+    char buf[REG_MAX * REG_NS_LEN];
+    int n = reg_load(buf);
+    for (int i = 0; i < n; i++) {
+        if (strcmp(buf + i * REG_NS_LEN, ns) == 0) return;
+    }
+    if (n >= REG_MAX) return;
+    strlcpy(buf + n * REG_NS_LEN, ns, REG_NS_LEN);
+    reg_save(buf, n + 1);
+}
+
 esp_err_t app_store_open(app_store_t *st, const char *id)
 {
     if (st == NULL || id == NULL) {
@@ -82,6 +123,7 @@ esp_err_t app_store_open(app_store_t *st, const char *id)
     }
     st->handle = (uint32_t)h;
     st->open   = true;
+    reg_add(ns);                 /* remember this namespace for later listing/deletion */
     return ESP_OK;
 }
 
@@ -237,4 +279,63 @@ esp_err_t app_store_erase_all(app_store_t *st)
         err = nvs_commit((nvs_handle_t)st->handle);
     }
     return err;
+}
+
+void app_store_seed_registry(void)
+{
+    /* Pick up namespaces that already hold data but were created before the registry
+     * existed (e.g. an app since uninstalled). App namespaces are the ones that are
+     * neither core (the reserved "tm" prefix) nor system (esp_wifi's dotted names). */
+    nvs_iterator_t it = NULL;
+    esp_err_t res = nvs_entry_find("nvs", NULL, NVS_TYPE_ANY, &it);
+    while (res == ESP_OK) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        const char *ns = info.namespace_name;
+        if (strncmp(ns, CORE_NS_PREFIX, strlen(CORE_NS_PREFIX)) != 0 && strchr(ns, '.') == NULL) {
+            reg_add(ns);
+        }
+        res = nvs_entry_next(&it);
+    }
+    nvs_release_iterator(it);
+}
+
+int app_store_ns_count(void)
+{
+    char buf[REG_MAX * REG_NS_LEN];
+    return reg_load(buf);
+}
+
+esp_err_t app_store_ns_get(int idx, char *out, size_t out_len)
+{
+    if (out == NULL || out_len == 0) return ESP_ERR_INVALID_ARG;
+    char buf[REG_MAX * REG_NS_LEN];
+    int n = reg_load(buf);
+    if (idx < 0 || idx >= n) return ESP_ERR_INVALID_ARG;
+    strlcpy(out, buf + idx * REG_NS_LEN, out_len);
+    return ESP_OK;
+}
+
+esp_err_t app_store_erase_ns(const char *ns)
+{
+    if (ns == NULL || ns[0] == '\0') return ESP_ERR_INVALID_ARG;
+
+    nvs_handle_t h;              /* wipe the data directly (not via app_store_open, which
+                                   would just re-register the namespace) */
+    if (nvs_open(ns, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_erase_all(h);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+
+    char buf[REG_MAX * REG_NS_LEN];    /* drop it from the registry */
+    int n = reg_load(buf), w = 0;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(buf + i * REG_NS_LEN, ns) != 0) {
+            if (w != i) memcpy(buf + w * REG_NS_LEN, buf + i * REG_NS_LEN, REG_NS_LEN);
+            w++;
+        }
+    }
+    reg_save(buf, w);
+    return ESP_OK;
 }

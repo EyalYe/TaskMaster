@@ -89,9 +89,11 @@ static char       s_info[INFO_MAX_LINES][INFO_LINE_MAX];
 static int        s_info_n;
 static ui_list_t  s_info_list;
 
-/* Delete-data targets: "Wi-Fi" (ns == NULL) + one per app config group (ns set). */
+/* Delete-data targets: "Wi-Fi" (ns == NULL) + one per stored app namespace (ns set). */
+#define DEL_NS_MAX 16   /* NVS namespace: 15 chars + NUL */
 typedef struct { const char *label; const char *ns; } del_target_t;
 static del_target_t s_del[DEL_MAX_TARGETS];
+static char         s_del_ns[DEL_MAX_TARGETS][DEL_NS_MAX];  /* backing storage for ns strings */
 static int          s_del_n;
 static int          s_del_sel;                 /* target awaiting confirm */
 static ui_list_t    s_del_list;
@@ -405,9 +407,23 @@ static void del_build_targets(void)
 {
     s_del_n = 0;
     s_del[s_del_n++] = (del_target_t){ .label = "Wi-Fi", .ns = NULL };
-    for (unsigned g = 0; g < app_config_group_count() && s_del_n < DEL_MAX_TARGETS; g++) {
-        const app_cfg_group_t *grp = app_config_group(g);
-        s_del[s_del_n++] = (del_target_t){ .label = grp->name, .ns = grp->ns };
+
+    /* Every namespace that has stored data (app_store registry, seeded from existing
+     * NVS) — so data from an app that's no longer installed is still listed. Show the
+     * installed app's friendly name if it declares this namespace, else the raw id. */
+    app_store_seed_registry();
+    int n = app_store_ns_count();
+    for (int i = 0; i < n && s_del_n < DEL_MAX_TARGETS; i++) {
+        char *ns = s_del_ns[s_del_n];
+        if (app_store_ns_get(i, ns, DEL_NS_MAX) != ESP_OK) {
+            continue;
+        }
+        const char *label = ns;
+        for (unsigned g = 0; g < app_config_group_count(); g++) {
+            const app_cfg_group_t *grp = app_config_group(g);
+            if (strcmp(grp->ns, ns) == 0) { label = grp->name; break; }
+        }
+        s_del[s_del_n++] = (del_target_t){ .label = label, .ns = ns };
     }
 }
 
@@ -426,12 +442,9 @@ static void del_confirm_cb(bool yes, void *ctx)
         wifi_mgr_stop();
         ESP_LOGW(TAG, "deleted Wi-Fi credentials");
     } else {
-        /* App: erase its whole app_store namespace (tokens/URLs/knobs). */
-        app_store_t st;
-        if (app_store_open(&st, t->ns) == ESP_OK) {
-            app_store_erase_all(&st);
-            app_store_close(&st);
-        }
+        /* App: erase the whole namespace (tokens/URLs/knobs) + forget it, so it
+         * disappears from the list — works even if the app isn't installed. */
+        app_store_erase_ns(t->ns);
         ESP_LOGW(TAG, "deleted '%s' data", t->label);
     }
 }
