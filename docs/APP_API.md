@@ -52,12 +52,18 @@ static const device_app_t my_app = {
 TASKMASTER_REGISTER_APP(my_app);
 ```
 
-Add it to the build — one manifest line in `main/idf_component.yml`:
+Add it to the build — one entry in [`apps.yaml`](../apps.yaml) (the only app-list file you edit; a build
+hook compiles it into the manifest for you — you never edit `main/` or core):
 
 ```yaml
-dependencies:
-  my_app:
-    path: ../apps/my_app        # in-tree, or use a `git:` URL to your own repo
+apps:
+  - name: my_app
+    path: apps/my_app           # in-tree (path from the repo root)
+  # or from its own repo:
+  # - name: my_app
+  #   git: https://github.com/you/my_app.git
+  #   path: app                 # the app's subdir inside that repo
+  #   version: main             # branch, tag, or commit
 ```
 
 Your component's `CMakeLists.txt` needs `REQUIRES taskmaster_core` and `WHOLE_ARCHIVE` (so the
@@ -360,12 +366,12 @@ Rules that keep teardown safe (§6A):
 - One job at a time (single worker): `async_job_submit` returns `NULL` if one is already running —
   skip this sync and try again later.
 
-## 9. Driving your own hardware (GPIO — convention, not yet enforced)
+## 9. Driving your own hardware (GPIO — your responsibility)
 
-There is **no sandbox**: your app can `#include "driver/gpio.h"` (and ADC/SPI/I²C) and call it directly
-on any pin. That means you *can* drive your own peripherals — but nothing stops you from breaking the
-device, so follow these rules. **They are convention today** (an enforced core `app_gpio` claim/release
-service arrives in Phase 6, PLAN §14); until then it's the honor system.
+There is **no sandbox and no arbitration** — a deliberate design choice: the OS stays small and trusts
+app authors. Your app can `#include "driver/gpio.h"` (and ADC/SPI/I²C) and call it directly on any pin.
+That means you *can* drive your own peripherals — but nothing stops you from breaking the device, so
+these rules are on you (there is no core service that will police them; PLAN §6E).
 
 **Pins that are yours** on the XIAO ESP32-C3 (full map in `board_pins.h`):
 
@@ -386,6 +392,20 @@ Plus the **shared I²C bus** (SDA=GPIO6 / SCL=GPIO7) for extra I²C devices at *
   left-configured pin or a dangling ISR breaks the clean-teardown guarantee (§2 / §6A).
 - **Don't spawn a task** to poll hardware (§2). Read it in `on_event`/`render`, do a one-shot in an
   `async_job`, or register an ESP-IDF timer/ISR in `init()` and remove it in `exit()`.
-- **No arbitration yet** — two apps both grabbing D6 will conflict. The Phase-6 `app_gpio` service will
-  publish the free pins and enforce claims (rejecting core pins + double-claims); design your app to
-  claim/release so it slots in cleanly when that lands.
+- **No arbitration** — nothing stops two installed apps from both grabbing D6; that conflict is on you
+  (in practice you run one hardware app). The free pins above are yours to use directly and responsibly
+  — there is no claim/release service to fall back on.
+
+## 10. Build, flash, and iterate
+
+Building your app is just building the project — there's no core to compile separately (it's a pinned
+dependency):
+
+- **CI (no toolchain):** push; GitHub Actions builds a `.bin` and attaches it to a Release (repo README).
+- **Local:** add your app to `apps.yaml`, then `idf.py set-target esp32c3 && idf.py build` (ESP-IDF
+  v6.0.1). The manifest is composed for you.
+- **Flash:** `python tools/flash.py` — USB, esptool-only (no ESP-IDF needed just to flash).
+- **Update over the air:** `python tools/ota_serve.py` hosts the image on your LAN; point the device's
+  `fw_url` at it (Settings → Web config) → Settings → Check update.
+
+Step-by-step recipes + every gotcha are in [`agents/skills/`](agents/skills/).
