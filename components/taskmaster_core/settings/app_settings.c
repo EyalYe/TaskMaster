@@ -436,16 +436,20 @@ static void act_delete_creds(void *ctx)
     s_mode = MODE_DELETE;
 }
 
-/* ── OTA update: pull a signed image from fw_url (esp_https_ota), reboot, rollback ── */
+/* ── OTA update: pull an image from fw_url (esp_https_ota), reboot, rollback ──
+ * HTTPS uses the cert bundle; a plain http:// fw_url is allowed for LAN self-hosting
+ * (§6D local OTA — the update comes from your own machine on the same network). */
 typedef struct { char url[OTA_URL_MAX]; } ota_ctx_t;
 
 static bool ota_work(async_job_t *job, void *ctx)
 {
     (void)job;
     ota_ctx_t *o = (ota_ctx_t *)ctx;
+    bool https = (strncmp(o->url, "https://", 8) == 0);
     esp_http_client_config_t http = {
         .url               = o->url,
-        .crt_bundle_attach = esp_crt_bundle_attach,   /* HTTPS via the cert bundle */
+        /* HTTPS → verify via the cert bundle; http:// (LAN) → plain, no TLS. */
+        .crt_bundle_attach = https ? esp_crt_bundle_attach : NULL,
         .timeout_ms        = OTA_HTTP_TMO_MS,
         .keep_alive_enable = true,
     };

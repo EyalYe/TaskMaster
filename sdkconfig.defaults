@@ -9,6 +9,9 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # pending-verify; main calls esp_ota_mark_app_valid_cancel_rollback() once it's healthy,
 # else the bootloader reverts to the previous slot on the next reboot. ---
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Allow a plain http:// fw_url so the device can OTA from a local LAN server
+# (§6D zero-hosting: tools/ota_serve.py). HTTPS URLs still verify via the cert bundle.
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
 
 # --- FreeRTOS: 1kHz tick so the 1ms input poll task is responsive (PLAN §4.6) ---
 CONFIG_FREERTOS_HZ=1000
