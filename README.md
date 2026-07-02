@@ -171,22 +171,25 @@ To re-provision later, open **Settings → Wi-Fi setup** from the Launcher (or h
 
 ### Managing apps
 
-Apps are pulled into a build via the manifest [`main/idf_component.yml`](main/idf_component.yml) — core
-and apps version independently (PLAN §11.2):
+The app list is **[`apps.yaml`](apps.yaml)** — the *only* file you edit to add or remove apps. A build
+hook (`tools/compose_apps.py`, run from the root `CMakeLists.txt`) compiles it into
+`main/idf_component.yml` (a **generated, git-ignored** artifact you never touch), so **core is never
+edited** to add an app (PLAN §6E):
 
 ```yaml
-dependencies:
-  app_hello:                          # in-tree example (this repo)
-    path: ../apps/app_hello
-  tm_local:                           # external app from its own repo, app/ subdir
+apps:
+  - name: app_hello                   # in-tree example (this repo)
+    path: apps/app_hello
+  - name: tm_local                    # external app from its own repo, app/ subdir
     git: git@github.com:EyalYe/TM-YappLocal.git
     path: app
+    # version: main                   # optional: pin a branch, tag, or commit
 ```
 
-The component manager fetches the remote into `managed_components/`, and the app **self-registers** —
-**no core edits**. Comment an entry out to remove that app; to disable **every** app, write
-`dependencies: {}` (an empty `dependencies:` key is invalid YAML). Each app declares its own config
-(URLs/tokens) via `TASKMASTER_REGISTER_APP_CONFIG`, so core never hardcodes app fields (PLAN §9.4).
+The component manager fetches each remote into `managed_components/`, and the app **self-registers** —
+**no core edits**. Comment an entry out to remove that app; leave `apps:` empty to ship just Settings.
+Each app declares its own config (URLs/tokens) via `TASKMASTER_REGISTER_APP_CONFIG`, so core never
+hardcodes app fields (PLAN §9.4).
 
 > A remote/private app repo is fetched over SSH at configure time, so a clean build needs git access to
 > it (cached in `managed_components/` + pinned in `dependencies.lock` afterward).

@@ -17,3 +17,7 @@ dependencies.lock
 
 # macOS
 .DS_Store
+
+# Generated from apps.yaml by tools/compose_apps.py (Phase 6 §6E) — do not commit.
+main/idf_component.yml
+__pycache__/

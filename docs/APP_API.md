@@ -2,8 +2,9 @@
 
 An app is a self-contained ESP-IDF component that implements the `device_app_t` interface and
 registers itself. The core (`taskmaster_core`) never references your app by name — you add or remove
-it by editing one line in [`main/idf_component.yml`](../main/idf_component.yml). This guide is the
-practical contract; see [`PLAN.md`](../PLAN.md) §6 / §6A for the full rationale.
+it with one entry in [`apps.yaml`](../apps.yaml) (compiled into the build manifest for you; you never
+edit core). This guide is the practical contract; see [`PLAN.md`](../PLAN.md) §6 / §6A for the full
+rationale.
 
 > **You never modify the OS.** `taskmaster_core` is a fixed, immutable contract — everything your app
 > needs is exposed through the public headers described here (`app.h`, `ui_frame.h`, `ui_list.h`,

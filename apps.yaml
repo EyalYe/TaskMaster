@@ -1,0 +1,34 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  apps.yaml — THE app list. This is the ONLY file you edit to add/remove apps.
+#
+#  It is compiled into main/idf_component.yml (a generated, git-ignored build
+#  artifact — never edit that) by tools/compose_apps.py, which runs automatically
+#  before every build. You never touch taskmaster_core: apps self-register and the
+#  core is a sealed dependency (PLAN §6E).
+#
+#  Each entry:
+#    name:     component name (required) — how the app is referenced internally
+#    path:     in-tree app → path from the repo root (e.g. apps/app_hello)
+#              git app      → the app's subdir inside its repo (e.g. app)
+#    git:      the app repo's URL (omit for an in-tree app)
+#    version:  git app only — which ref to pull: a branch, tag, or commit
+#              (aliases: branch / tag / ref). Omit to track the repo default.
+#
+#  To build with no user apps at all, leave `apps:` empty (just Settings ships).
+# ═══════════════════════════════════════════════════════════════════════════
+apps:
+  # In-tree example app (lives in this repo — the canonical smoke/leak-test app).
+  - name: app_hello
+    path: apps/app_hello
+
+  # Remote apps, each from its own repo (the device app is in the repo's app/ subdir).
+  # Comment an entry out to drop that app — no core edits, ever. Add `version:` to
+  # pin a branch, tag, or commit, e.g.:
+  #     version: main       # track a branch
+  #     version: v1.2.0     # pin a release tag
+  - name: tm_local
+    git: git@github.com:EyalYe/TM-YappLocal.git
+    path: app
+  - name: tm_yapp
+    git: git@github.com:EyalYe/TM-YappCloud.git
+    path: app

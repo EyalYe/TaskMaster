@@ -1,5 +1,21 @@
 # TaskMaster-C3 — top-level ESP-IDF project file
 cmake_minimum_required(VERSION 3.16)
+
+# Phase 6 §6E step 1 — regenerate the app manifest from the user-owned apps.yaml
+# BEFORE the component manager (invoked by project.cmake) resolves dependencies.
+# apps.yaml is the only app list you edit; main/idf_component.yml is a generated,
+# git-ignored artifact. Runs on every configure; rewrites only when apps.yaml changed.
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(NOT Python3_EXECUTABLE)
+    set(Python3_EXECUTABLE python3)
+endif()
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tools/compose_apps.py"
+    RESULT_VARIABLE _compose_rc)
+if(NOT _compose_rc EQUAL 0)
+    message(FATAL_ERROR "compose_apps.py failed — check apps.yaml")
+endif()
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(taskmaster_c3)
 
