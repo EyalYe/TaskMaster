@@ -411,36 +411,62 @@ build time):** refresh cadence; the glyph asset pipeline (SVG → LVGL C array);
 table; whether the status bar ever shows outside the Launcher. *(Weather/timezone provider is decided —
 keyless Open-Meteo, step 4.)*
 
-### 6D. Zero-toolchain onboarding (Phase 6) — CI build + web flash + OTA
+### 6D. Onboarding (Phase 6) — zero self-hosting: template repo + GitHub CI + local Python tools
 
-**Goal:** a developer/user shouldn't need ESP-IDF, a toolchain, or the CLI. Pick your apps, push, and
-the user flashes once from a web page — then the device self-updates over the air. **Feasibility: all
-three pieces are standard and well-supported** — this is the ZMK-config model, and our OTA half already
-exists (Phase 4 step 7).
+**Goal:** a developer picks/writes their apps and gets a working device, and **the maintainer hosts
+nothing** but a GitHub repo. Everything device-facing is a **local Python tool** the user runs on their
+own machine. Decided 2026-07-02 (see the [[phase6-onboarding-immutable-core]] memory).
 
-1. **GitHub Actions — auto-build on push.** Espressif ships an official CI action
-   (`espressif/esp-idf-ci-action` / the `esp-idf` Docker image) that runs `idf.py build`. On push it
-   produces `taskmaster_c3.bin` (+ bootloader / partition-table / ota_data) and a **merged single
-   image** (`idf.py merge-bin`), uploaded as artifacts / attached to a **Release**. Pin the app repos
-   via the manifest so a fork with a different app set just builds.
-2. **Browser flash tool — no local toolchain.** **ESP Web Tools** (`esp-web-tools`, wrapping
-   `esptool-js` over the **Web Serial API**): a GitHub Pages page with an *Install* button + a
-   `manifest.json` pointing at the merged `.bin` flashes the board over USB straight from the browser.
-   *Caveat:* Web Serial is **Chrome/Edge desktop only** (not Safari/Firefox/mobile) — same class of
-   limitation as Web Bluetooth. The XIAO C3's native USB reset-to-bootloader works with esptool-js on a
-   fresh chip (the deep-sleep flashing gotcha doesn't apply to first flash).
-3. **OTA thereafter.** Already built: `esp_https_ota` + rollback (step 7). Point `fw_url` at the latest
-   Release/Pages `.bin` — the device pulls + self-updates. **Flash once from the web → OTA forever.**
+**Fork target = a new *template* repo (not this one).** `taskmaster_core` becomes a **sealed git
+dependency** — the developer forks the template and never touches core. The template ships:
+- a **skeleton app** (a working `device_app_t` starting point) + a copy of `docs/APP_API.md`,
+- **`apps.yaml`** (the only file edited to add/remove apps; core pulled as a pinned git dep),
+- **GitHub Actions** that runs `idf.py build` on push and publishes the merged `.bin` as a build
+  artifact / **Release** (GitHub hosts the build — free; not "you hosting"),
+- a **README** linking the local tools below.
 
-**Developer flow (ZMK-config style):** fork the config repo → edit `main/idf_component.yml` (choose
-apps) → push → CI builds + publishes the image and the web-flash manifest → user clicks *Install* on the
-project's Pages site → after that, `fw_url` → the release and the device OTA-updates itself.
+**Local Python tools (the maintainer hosts nothing):**
+1. **First-time flash** — a Python tool wrapping **esptool** flashes the merged `.bin` over USB. (The
+   XIAO C3's native-USB reset-to-bootloader works on a fresh chip; the deep-sleep flashing gotcha only
+   bites later.) A browser Web-Serial flasher (esp-web-tools) is an *optional* convenience, not required.
+2. **Local OTA host** — a Python **HTTP** server serves the built `.bin` on the LAN; the device's
+   existing OTA (`fw_url` → `http://<your-machine>:port/...`) pulls updates from the user's own machine.
+   No cloud, no Release URL needed. **Requires allowing plain `http://` on the OTA path** (approved
+   2026-07-02) — the Phase-4 path is `esp_https_ota` (HTTPS-only), so the local-update path must accept
+   `http://` (either an `esp_http_client`-based OTA or letting the OTA URL be http for LAN use).
+3. *(optional)* **build locally** — a thin wrapper for devs who don't want to wait on CI.
 
-**Decide at build time:** where the OTA `.bin` is hosted (GitHub Releases vs Pages vs CDN; HTTPS is fine
-— `esp_crt_bundle` covers GitHub's certs); whether to **bake `fw_url`** to the project's release URL so
-OTA works out of the box; **image signing** for secure OTA (deferred — rollback already guards a bad
-image); and a **version check** (compare `esp_app_desc` version vs a published manifest) so "Check
-update" only downloads when there's something newer (today it always downloads).
+**Developer flow:** fork the template → edit `apps.yaml` (or drop in your app) → push (CI builds the
+`.bin`, or build locally) → run the local **flash** tool once over USB → run the local **OTA host**;
+point the device's `fw_url` at it and the device self-updates over the LAN.
+
+**Deferred:** image signing (rollback already guards a bad image); a version check so "Check update"
+only pulls when something's newer (today it always downloads); a hosted browser flasher / catalog.
+
+### 6E. Phase 6 build order
+
+Decided 2026-07-02 (see the [[phase6-onboarding-immutable-core]] memory). Core is a **sealed, immutable
+contract**; nothing here lets an app reach into it.
+
+1. **App composition — user-owned `apps.yaml` + a seamless hook.** `apps.yaml` is the *only* file edited
+   to add/remove apps. A hook in the root `CMakeLists.txt` (before `include(project.cmake)`) regenerates
+   `main/idf_component.yml` (a **gitignored** build artifact) from it before the component manager runs;
+   an explicit `tools/compose_apps.py` does the translation (so CI can call it too). Built here first
+   (local core); the template repo (§6D) reuses it with core as a git dep. → adding an app never edits a
+   core-owned file.
+2. **App-API versioning (semver).** The OS exposes an API version; an app declares the version it targets
+   (in its registration); core checks compatibility at register time and refuses / warns on a mismatch,
+   so core + apps evolve independently.
+3. **Per-app NVS budgets + namespace-collision hardening.** Bound each app's `app_store` usage and make
+   namespace collisions impossible/detected, so one app can't exhaust NVS or stomp another's keys (§9.3).
+4. **GPIO is the app's own risk (docs only — no arbitration service).** We deliberately *do not* build
+   an `app_gpio` claim/release service. Apps may use the free pads (D6–D9 + shared I²C) directly; the
+   **risk is documented** (a pin conflict, or grabbing a core-owned pin, is on the app author) in
+   `docs/APP_API.md` + `platform/board_pins.h`. *(Cheap; can land alongside step 1.)*
+5. **Pomodoro example app.** A removable non-task example *user app* that exercises the whole path
+   (composition, versioning, maybe a free GPIO) — the extensibility proof + the template's skeleton.
+6. **§6D onboarding** — the new template repo + GitHub CI + local Python flash/OTA tools; make
+   `taskmaster_core` git-consumable; allow `http://` on the OTA path for local updates.
 
 ### Apps — core (built-in, non-removable) vs. user (manifest-driven, removable)
 
@@ -1399,7 +1425,7 @@ headers, §6) and the **device REST contract** (§8.1).
 | **4 — Settings + power** ✅ | Finish the **Settings hub** (§6) as a **schema-driven** menu (§8A.1): a generic knob-editor + confirm dialog (step 0), then device info (incl. **fw version/build date**) / restart / factory reset, startup target, **brightness**, timeout, deep-sleep; per-app `ACFG_KNOB` via the same editor; OTA-stub. Idle timeout + sleep scaffolding; **convert input from 1 ms poll → interrupt/GPIO-wake** (see note ↓). *(Sync interval is app-owned, not here; long-press stays out of core nav.)* | Settings menu navigates; one editor drives every knob (core + per-app); startup target, brightness, deep-sleep toggle, timeout persist and take effect; factory reset/restart work behind a confirm; screen blanks on idle; **system reaches light sleep when idle** |
 | **4.5 — OTA path** ✅ | `esp_https_ota` + rollback | Done: device pulls an image from `fw_url`, boots the new slot, self-confirms / rolls back (verified) |
 | **5 — Core UX completion** ✅ | Tie the core together + finish the shell UI (§6C.1): **glyph hint bar** (the `icons/` 1-bit glyphs replace the ≤3-char text labels, text fallback kept), a **Launcher status bar** (connectivity glyph + **NTP time** + **weather**, °C/°F), an **NTP time** core service + **city** provisioning field + keyless Open-Meteo weather/timezone, a **LAN config page** (edit config in-browser, no re-provision), and a **cohesion pass** — consistent action glyphs + city-"not found" surfacing | Hint boxes show glyphs; the Launcher shows time + weather + connectivity when online with a city (its plain list otherwise); core screens feel consistent — **all verified on hardware** |
-| **6 — External developers + platform** ◀ next | Make the platform safe + pleasant to host third-party apps: an **`app_gpio` claim/release service** (free pads D6/D7/D8/D9 + shared I²C; reject core-owned pins + double-claims; release on `exit()` — until then it's unmanaged convention, docs/APP_API.md §9); **per-app NVS budget enforcement** + `nvs` sizing (§9.3); namespace-**collision hardening**; broader **sandboxing**; a **Pomodoro** removable example *user app* (extensibility proof); **app-API versioning** (semver); and **zero-toolchain onboarding** (§6D) — **GitHub Actions** compiles a flashable image on push, a **browser flash tool** does the first flash (no local ESP-IDF), and everything after is **OTA** (Phase 4 step 7) | Apps can't exhaust NVS, grab a core pin, or fight over a pin; a third-party non-task app ships cleanly; the app API is versioned; **a user with no toolchain can flash once from a web page and then self-update over the air** |
+| **6 — External developers + platform** ◀ next | Make the platform safe + pleasant to host third-party apps **without ever touching the immutable core** (build order §6E): **app composition** via a user-owned `apps.yaml` + a seamless CMake hook (adding an app never edits a core file); **app-API versioning** (semver); **per-app NVS budget enforcement** + namespace-collision hardening (§9.3); **GPIO left to the app** (documented risk, no arbitration service); a **Pomodoro** removable example *user app* (extensibility proof); and **zero-self-hosting onboarding** (§6D) — a **template repo** the dev forks (core = sealed git dep) + **GitHub Actions** builds on push + **local Python tools** flash (esptool) and host OTA over the LAN (no cloud) | Adding an app never edits core; the app API is versioned; apps can't exhaust NVS or stomp namespaces; a third-party non-task app ships cleanly; **a dev forks a template, and a user flashes once locally then self-updates over the LAN — the maintainer hosts nothing** |
 | | *(**Parked / future:** **BLE provisioning** as a 2nd Wi-Fi transport — it needs a dedicated phone app and carries only Wi-Fi creds, so it's a nicety over the no-app SoftAP browser form; revisit if iOS setup becomes a real pain. Direct Todoist + app-declared config were pulled forward to Phase 3.)* | |
 
 Phases 0–4.5 = MVP (**done + verified on hardware**). Phase 5 = **core UX completion** (the Launcher
