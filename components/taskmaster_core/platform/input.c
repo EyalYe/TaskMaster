@@ -10,6 +10,7 @@ static const char *TAG = "input";
 
 #define POLL_MS         1
 #define DEBOUNCE_SAMPLES 20      /* 20 * 1ms = 20ms stable before a button commits */
+#define LONG_PRESS_MS   700      /* hold this long → the button's long-press event */
 
 static QueueHandle_t s_queue;
 
@@ -37,15 +38,18 @@ static const uint8_t ttable[7][4] = {
 /* --- buttons: active-low, internal pull-up --- */
 typedef struct {
     gpio_num_t   pin;
-    input_event_t ev;
-    int          stable;   /* last committed level (1 = released) */
-    int          cnt;      /* consecutive samples disagreeing with `stable` */
+    input_event_t ev;       /* short-press event */
+    input_event_t long_ev;  /* long-press event, or 0 = no long-press (emit on press edge) */
+    int          stable;    /* last committed level (1 = released) */
+    int          cnt;       /* consecutive samples disagreeing with `stable` */
+    int          held_ms;   /* time held while pressed (long-press buttons) */
+    bool         long_sent; /* the long-press was already emitted this hold */
 } button_t;
 
 static button_t s_buttons[] = {
-    { PIN_ENC_SW,     EV_ENCODER_CLICK, 1, 0 },
-    { PIN_BTN_SELECT, EV_SELECT,        1, 0 },
-    { PIN_BTN_HOME,   EV_HOME,          1, 0 },
+    { PIN_ENC_SW,     EV_ENCODER_CLICK, 0,              1, 0, 0, false },
+    { PIN_BTN_SELECT, EV_SELECT,        EV_SELECT_LONG, 1, 0, 0, false },
+    { PIN_BTN_HOME,   EV_HOME,          0,              1, 0, 0, false },
 };
 #define NUM_BUTTONS (sizeof(s_buttons) / sizeof(s_buttons[0]))
 
@@ -67,16 +71,32 @@ static void input_task(void *arg)
             default: break;
         }
 
-        /* buttons (debounce, emit on press edge) */
+        /* buttons: plain buttons emit on the press edge. A long-press-capable button
+         * (Select) defers — it emits the long event once held past LONG_PRESS_MS, or
+         * the short event on release if let go before then. */
         for (size_t i = 0; i < NUM_BUTTONS; i++) {
             button_t *b = &s_buttons[i];
             int raw = gpio_get_level(b->pin);
             if (raw == b->stable) {
                 b->cnt = 0;
+                if (b->long_ev && b->stable == 0) {           /* still held down */
+                    b->held_ms += POLL_MS;
+                    if (!b->long_sent && b->held_ms >= LONG_PRESS_MS) {
+                        post(b->long_ev);
+                        b->long_sent = true;
+                    }
+                }
             } else if (++b->cnt >= DEBOUNCE_SAMPLES) {
                 b->stable = raw;
                 b->cnt = 0;
-                if (raw == 0) post(b->ev);   /* pressed (active-low) */
+                if (!b->long_ev) {
+                    if (raw == 0) post(b->ev);                /* plain button: on press */
+                } else if (raw == 0) {                         /* long-capable: pressed → start timing */
+                    b->held_ms = 0;
+                    b->long_sent = false;
+                } else if (!b->long_sent) {                     /* released before threshold → short */
+                    post(b->ev);
+                }
             }
         }
 
@@ -153,6 +173,7 @@ const char *input_event_name(input_event_t ev)
         case EV_ENCODER_CCW:   return "ENCODER CCW";
         case EV_ENCODER_CLICK: return "ENCODER CLICK";
         case EV_SELECT:        return "SELECT";
+        case EV_SELECT_LONG:   return "SELECT LONG";
         case EV_HOME:          return "HOME";
         default:               return "?";
     }

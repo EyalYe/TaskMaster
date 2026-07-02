@@ -93,7 +93,8 @@ need a mutex for your own state. Key rules:
 // input.h
 EV_ENCODER_CW, EV_ENCODER_CCW,   // knob rotation
 EV_ENCODER_CLICK,                // knob push
-EV_SELECT,                       // Select button
+EV_SELECT,                       // Select button (short press — delivered on release)
+EV_SELECT_LONG,                  // Select held ~0.7s (app-API 1.2); short press won't also fire
 // EV_HOME is OS-reserved — it returns to the Launcher and is NEVER delivered to your app.
 ```
 

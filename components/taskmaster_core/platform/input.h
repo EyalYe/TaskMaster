@@ -15,8 +15,9 @@ typedef enum {
     EV_ENCODER_CW = 1,
     EV_ENCODER_CCW,
     EV_ENCODER_CLICK,   /* encoder push switch */
-    EV_SELECT,          /* Select button */
+    EV_SELECT,          /* Select button (short press, on release) */
     EV_HOME,            /* Home button (OS-reserved, §5.2) */
+    EV_SELECT_LONG,     /* Select held (app-API 1.2); short press then arrives on release */
 
     /* System events: posted by core onto the same UI event queue, handled by the
      * UI task, and NEVER delivered to an app's on_event. Apps react by reading the

@@ -41,7 +41,7 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static bool is_user_input(input_event_t ev)
 {
     return ev == EV_ENCODER_CW || ev == EV_ENCODER_CCW || ev == EV_ENCODER_CLICK ||
-           ev == EV_SELECT || ev == EV_HOME;
+           ev == EV_SELECT || ev == EV_SELECT_LONG || ev == EV_HOME;
 }
 
 static void screen_wake(void)
