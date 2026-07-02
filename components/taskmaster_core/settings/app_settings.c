@@ -17,6 +17,7 @@
 #include "softap_portal.h"
 #include "wifi_mgr.h"
 #include "net_status.h"
+#include "wx.h"
 #include "nvs_config.h"
 #include "app_manager.h"
 #include "app_config.h"
@@ -181,6 +182,8 @@ static void gather_info(void)
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(L[s_info_n++], INFO_LINE_MAX, "MAC:%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    wx_status_str(L[s_info_n++], INFO_LINE_MAX);   /* city / weather / 'not found' */
 
     const esp_app_desc_t *d = esp_app_get_description();
     snprintf(L[s_info_n++], INFO_LINE_MAX, "FW: %s", d->version);

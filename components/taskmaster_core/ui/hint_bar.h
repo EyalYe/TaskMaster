@@ -1,17 +1,17 @@
 /*
- * hint_bar.h — the contextual control hint bar (PLAN §6).
+ * hint_bar.h — the contextual control-hint bar: struct + geometry (PLAN §6).
  *
  * A vertical 21px-wide column down the right edge with three boxes (1px gaps):
  *   top    = Home    (OS-fixed)            — 16px tall
  *   middle = Encoder — rotate (top cell)   — 28px tall (extra height so its two
  *            + push/click (bottom cell)      cells aren't cramped)
  *   bottom = Select                        — 16px tall
- * Apps declare only the three app-usable controls; Home is OS-fixed. An app "uses"
- * the hint bar by drawing it (NULL fields hide a cell). Content area is the left
- * 108×64 when the bar is shown.
+ * Apps declare only the three app-usable controls (Home is OS-fixed); a NULL field
+ * hides/defaults a cell. Content area is the left 107×64 when the bar is shown.
  *
- * NOTE: this is the interim raw-`sh1106` renderer; in Phase 3 Part A (§8.5) the bar
- * is re-implemented as LVGL widgets — this struct + geometry carry over.
+ * The bar is rendered as LVGL widgets by the OS frame (ui_frame.c), which maps a
+ * label to a glyph where one exists (hint_glyphs.h) and keeps the text as fallback.
+ * This header is just the shared control_hints_t + the box geometry.
  */
 #pragma once
 

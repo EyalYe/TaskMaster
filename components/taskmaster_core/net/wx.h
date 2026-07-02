@@ -27,3 +27,7 @@ bool wx_weather(int *temp_c, int *weather_code);
 
 /* A short word for a WMO weather code ("Clear" / "Cloudy" / "Rain" / …). */
 const char *wx_weather_desc(int weather_code);
+
+/* One-line human status for Device info: no city / '<city>' not found / <city> NNC /
+ * fetching. Lets a mistyped city surface instead of silently showing no weather. */
+void wx_status_str(char *out, size_t out_len);

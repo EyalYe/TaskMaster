@@ -45,6 +45,7 @@ static int    s_offset;              /* utc_offset_seconds (read by UI) */
 static int    s_temp;                /* °C, rounded (read by UI) */
 static int    s_code;                /* WMO weather code (read by UI) */
 static bool   s_have_wx;             /* a forecast has been fetched (read by UI) */
+static bool   s_geo_notfound;        /* geocoder responded but the city didn't match */
 static TaskHandle_t s_task;          /* the fetch task (for wx_refresh wakeups) */
 
 /* Minimal percent-encode for a query value (city names have spaces/accents). */
@@ -132,6 +133,7 @@ static bool geocode(const char *city)
             ok = true;
         }
     }
+    s_geo_notfound = !ok;   /* the API responded (body != NULL) but had no usable match */
     cJSON_Delete(root);
     ESP_LOGI(TAG, "geocode '%s': %s (%.4f, %.4f)", city, ok ? "ok" : "FAIL", s_lat, s_lon);
     return ok;
@@ -238,6 +240,21 @@ bool wx_weather(int *temp_c, int *weather_code)
     if (temp_c)      *temp_c = s_temp;
     if (weather_code) *weather_code = s_code;
     return true;
+}
+
+void wx_status_str(char *out, size_t out_len)
+{
+    char city[WX_CITY_MAX] = {0};
+    config_get_str("city", city, sizeof(city));
+    if (!city[0]) {
+        snprintf(out, out_len, "Weather: (no city)");
+    } else if (s_have_wx) {
+        snprintf(out, out_len, "Weather: %s %dC", city, s_temp);
+    } else if (s_geo_notfound) {
+        snprintf(out, out_len, "Weather: '%s' not found", city);
+    } else {
+        snprintf(out, out_len, "Weather: %s ...", city);   /* connecting / fetching */
+    }
 }
 
 /* WMO weather-code → short word (open-meteo.com/en/docs, WW interpretation). */

@@ -16,16 +16,25 @@ progress. The current stepped plan lives in [`PLAN.md`](PLAN.md).
 | **2** | **Paste-from-phone provisioning** — SoftAP captive form writes Wi-Fi + app config to NVS | ✅ |
 | **3** | **LVGL UI + tasks in userspace** — Todoist (direct HTTPS) and LAN task apps; offline cache + write replay; the Settings hub | ✅ |
 | **4** | **Settings hub** (schema-driven) + power/idle (blank, light sleep) + **OTA update** | ✅ |
-| **5** | **Core UX completion** — Launcher status bar (time · weather · connectivity) + glyph hint bar + core cohesion | ◀ next |
-| **6** | **External developers + platform** — GPIO arbitration, per-app NVS budgets, sandboxing, example app, API versioning | planned |
+| **5** | **Core UX completion** — Launcher status bar (time · weather · connectivity, °C/°F) + glyph hint bar + keyless weather/time + in-browser LAN config + cohesion | ✅ |
+| **6** | **External developers + platform** — GPIO arbitration, per-app NVS budgets, sandboxing, example app, API versioning, zero-toolchain onboarding | ◀ next |
 
 *(BLE provisioning is parked — a nicety over the no-app SoftAP form; revisit if iOS setup becomes a pain.)*
 
-## What the device does today (Phase 4)
+## What the device does today (Phase 5)
 
 A self-contained **OS** for the device: a manifest-driven app framework with a Launcher, run by one UI
 task, that provisions itself from a phone, connects to Wi-Fi, and runs task apps against a real
 backend — all verified on a XIAO ESP32-C3.
+
+- **At-a-glance status bar + weather/time.** The Launcher's bottom strip shows a **connectivity glyph**
+  (Wi-Fi / no-Wi-Fi), **local time**, **temperature** (°C/°F, Settings toggle), and a **weather glyph**
+  (sun / partly-cloudy day·night / rain / snow). Time is NTP; weather + timezone come from a **keyless**
+  Open-Meteo lookup keyed by a `city` field — no API key or signup. The **hint bar** renders 1-bit
+  glyphs for conventional actions (done ✓, open, menu, reset) with text as the fallback.
+- **Edit config in a browser (no re-provisioning).** Toggle **Settings → Web config** and open the
+  device's LAN IP (shown in Device info) to edit any field — city, tokens, URLs — in a pre-filled form;
+  most edits apply **live** (only a Wi-Fi change reboots).
 
 - **Real tasks, two sources.** A **Yapp** app talks to **Todoist directly over HTTPS** (no proxy); a
   **Local** app speaks a small LAN REST contract. Both render priority-sorted, nested tasks; **Select**
@@ -83,8 +92,9 @@ components/taskmaster_core/    the OS: app framework + platform services (task-a
              async_job
   storage/   nvs_config        schema-driven device config; per-app private storage;
              app_store app_config   app-declared config fields (form + Settings), core names no app
-  net/       wifi_mgr          Wi-Fi owner; captive HTTP provisioning form + DNS;
-             softap_portal net_status   connectivity API
+  net/       wifi_mgr          Wi-Fi owner; provisioning form + DNS (SoftAP) + LAN config
+             softap_portal net_status   page (station IP); connectivity API; wx = NTP time +
+             wx                keyless Open-Meteo weather/timezone
   settings/  app_settings      the Settings hub app; its schema editor + confirm dialog
              settings_menu confirm
   test/      leak_test         §6A.4 leak harness (CONFIG_TM_LEAK_TEST)

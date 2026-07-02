@@ -60,7 +60,7 @@ static const lv_image_dsc_t *hint_action_glyph(const char *s)
     if (s == NULL) {
         return NULL;
     }
-    if (strcmp(s, "DON") == 0) return &glyph_check;    /* complete / done */
+    if (strcmp(s, "DON") == 0 || strcmp(s, "OK") == 0) return &glyph_check;  /* done / confirm */
     if (strcmp(s, "OPN") == 0 || strcmp(s, "SEL") == 0) return &glyph_select;
     if (strcmp(s, "MNU") == 0) return &glyph_menu;     /* menu / detail */
     if (strcmp(s, "RST") == 0) return &glyph_reset;    /* reset / back */
