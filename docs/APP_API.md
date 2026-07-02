@@ -5,6 +5,11 @@ registers itself. The core (`taskmaster_core`) never references your app by name
 it by editing one line in [`main/idf_component.yml`](../main/idf_component.yml). This guide is the
 practical contract; see [`PLAN.md`](../PLAN.md) §6 / §6A for the full rationale.
 
+> **You never modify the OS.** `taskmaster_core` is a fixed, immutable contract — everything your app
+> needs is exposed through the public headers described here (`app.h`, `ui_frame.h`, `ui_list.h`,
+> `app_store.h`, `net_status.h`, `async_job.h`, `app_config.h`). If a capability isn't exposed, treat it
+> as off-limits rather than reaching into core: your app lives entirely in its own component/repo.
+
 ## 1. The interface
 
 ```c
@@ -150,7 +155,7 @@ action once (on Select) — so a screen where the encoder-push and Select do the
 
 #### Glyphs vs. text
 
-Each box shows a **1-bit glyph** for a set of conventional tokens, and falls back to your **≤3-char
+The OS renders a **1-bit glyph** for a set of conventional tokens, and falls back to your **≤3-char
 text** for anything else (so any label is safe — it just renders as text if there's no glyph):
 
 | Token | Glyph | Meaning |
@@ -162,11 +167,8 @@ text** for anything else (so any label is safe — it just renders as text if th
 | `BAK` | ← back | back |
 
 Prefer these tokens when they fit your action, so the whole device speaks one visual language; use plain
-text (e.g. `"SYN"`, `"+/-"`) otherwise. **Adding a new glyph** is a core change, not an app one: drop a
-square icon (SVG or PNG, dark-on-transparent) into `icons/`, add one line to `tools/gen_glyphs.py`
-(name, file, target px, alpha threshold), run it to regenerate `ui/hint_glyphs.[ch]` (it prints an ASCII
-preview), and map the token in `ui_frame.c`'s `hint_action_glyph()`. The status-bar weather/connectivity
-glyphs come from the same pipeline.
+text (e.g. `"SYN"`, `"+/-"`) otherwise. The glyph set is **owned by the OS** — you only ever supply a
+string, and the OS decides how to draw it.
 
 ## 5. Reading platform status — connectivity
 
