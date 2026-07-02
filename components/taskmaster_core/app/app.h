@@ -3,13 +3,32 @@
  *
  * An app is a self-contained component that defines a device_app_t and registers
  * itself with TASKMASTER_REGISTER_APP(). taskmaster_core never references an app by
- * name, so apps can live in separate repos and be added/removed via the manifest
- * (main/idf_component.yml) with no core edits.
+ * name, so apps can live in separate repos and be added/removed via apps.yaml (the
+ * app list) with no core edits.
  */
 #pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
+
+/* ── App-API version (semver) ───────────────────────────────────────────────
+ * The version of THIS contract (the public headers below + the sibling app_* / ui_*
+ * / net_status / async_job headers). Apps are **statically linked** against these
+ * headers, so compatibility is enforced at BUILD time — not runtime: an app states
+ * the version it needs with TASKMASTER_REQUIRE_API() and the build fails with a clear
+ * message if the core pinned in apps.yaml is incompatible (you can't even flash a
+ * mismatched image). The running version is also logged at boot and shown in
+ * Settings → Device info. Bump MAJOR for a breaking change, MINOR for a
+ * backward-compatible addition. Core and apps thus version independently. */
+#define TM_API_VERSION_MAJOR 1
+#define TM_API_VERSION_MINOR 0
+
+/* Drop this at file scope in your app to require an app-API version. Compatible =
+ * same MAJOR and at least the requested MINOR. A mismatch is a compile error. */
+#define TASKMASTER_REQUIRE_API(maj, min)                                            \
+    _Static_assert((maj) == TM_API_VERSION_MAJOR && (min) <= TM_API_VERSION_MINOR,  \
+        "This app requires a different TaskMaster app-API (need " #maj "." #min ") " \
+        "than the core pinned in apps.yaml. Update the app, or pin a compatible core.")
 
 typedef struct device_app {
     const char *name;                 /* shown in the Launcher */

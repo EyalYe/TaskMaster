@@ -454,9 +454,15 @@ contract**; nothing here lets an app reach into it.
    an explicit `tools/compose_apps.py` does the translation (so CI can call it too). Built here first
    (local core); the template repo (§6D) reuses it with core as a git dep. → adding an app never edits a
    core-owned file.
-2. **App-API versioning (semver).** The OS exposes an API version; an app declares the version it targets
-   (in its registration); core checks compatibility at register time and refuses / warns on a mismatch,
-   so core + apps evolve independently.
+2. **App-API versioning (semver). ✅ Done.** `app.h` defines `TM_API_VERSION_MAJOR/MINOR` (the version
+   of the public-header contract). Because apps are **statically linked** against the core headers, the
+   compatibility check is at **build time**, which is strictly stronger than a runtime check (you can't
+   even flash a mismatched image): an app states its need with `TASKMASTER_REQUIRE_API(maj, min)` — a
+   `_Static_assert` (same major, ≥ minor) that fails the build with a clear message pointing at
+   `apps.yaml` if the pinned core is incompatible. The running version is logged at boot and shown in
+   **Settings → Device info** (`app-API: 1.0`). Bump MAJOR for a breaking change, MINOR for a compatible
+   addition; core + apps version independently. *(Documented in APP_API §11; the template skeleton uses
+   `TASKMASTER_REQUIRE_API`.)*
 3. **Per-app NVS budgets + namespace-collision hardening.** Bound each app's `app_store` usage and make
    namespace collisions impossible/detected, so one app can't exhaust NVS or stomp another's keys (§9.3).
 4. **GPIO is the app's own risk (docs only — no arbitration service).** We deliberately *do not* build

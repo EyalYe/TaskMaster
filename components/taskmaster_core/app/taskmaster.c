@@ -55,6 +55,7 @@ void taskmaster_run(void)
      * constructors before app_main; core apps are owned by the core. */
     app_manager_register(app_settings_get());
 
+    ESP_LOGI(TAG, "app-API v%d.%d", TM_API_VERSION_MAJOR, TM_API_VERSION_MINOR);
     ESP_LOGI(TAG, "Registered apps: %u", app_manager_count());
     for (unsigned i = 0; i < app_manager_count(); i++) {
         ESP_LOGI(TAG, "  app[%u] = %s", i, app_manager_get(i)->name);

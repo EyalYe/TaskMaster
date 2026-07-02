@@ -57,7 +57,7 @@ static const char *TAG = "app.settings";
 #define PORTAL_URL_ROW      4
 
 /* Device-info sub-screen. */
-#define INFO_MAX_LINES      10
+#define INFO_MAX_LINES      12
 #define INFO_LINE_MAX       40   /* fits "SSID: " / "FW: " + a 32-char value; long lines scroll */
 #define INFO_SSID_MAX       33
 
@@ -188,6 +188,8 @@ static void gather_info(void)
     const esp_app_desc_t *d = esp_app_get_description();
     snprintf(L[s_info_n++], INFO_LINE_MAX, "FW: %s", d->version);
     snprintf(L[s_info_n++], INFO_LINE_MAX, "Built: %s", d->date);
+    snprintf(L[s_info_n++], INFO_LINE_MAX, "app-API: %d.%d",
+             TM_API_VERSION_MAJOR, TM_API_VERSION_MINOR);
 
     snprintf(L[s_info_n++], INFO_LINE_MAX, "Heap: %u KB",
              (unsigned)(esp_get_free_heap_size() / 1024));

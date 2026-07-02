@@ -409,3 +409,29 @@ dependency):
   `fw_url` at it (Settings → Web config) → Settings → Check update.
 
 Step-by-step recipes + every gotcha are in [`agents/skills/`](agents/skills/).
+
+## 11. App-API version (pin what you need)
+
+The app API (these public headers) is versioned **semver** in `app.h`:
+`TM_API_VERSION_MAJOR.TM_API_VERSION_MINOR`. Because your app is **statically linked** with the core you
+pin in `apps.yaml`, compatibility is checked at **build time** — better than a runtime check, since a
+mismatched image can't even be built or flashed.
+
+State the version your app needs at file scope:
+
+```c
+#include "app.h"
+TASKMASTER_REQUIRE_API(1, 0);   // need app-API 1.0 (same major, minor >= 1.0)
+```
+
+- Compatible = **same MAJOR** and **at least the requested MINOR**. If the core pinned in `apps.yaml`
+  is a different major (breaking) or an older minor (missing features), the **build fails** with a
+  message telling you to pin a compatible core.
+- **MAJOR** bumps on a breaking change; **MINOR** on a backward-compatible addition. So `apps.yaml`
+  `version:` (which core to pull) and `TASKMASTER_REQUIRE_API` (what your app needs) work together: pin a
+  core `>=` what you require, same major.
+- The running version is logged at boot and shown in **Settings → Device info** (`app-API: x.y`).
+
+`TASKMASTER_REQUIRE_API` is optional but recommended — without it your app simply compiles against
+whatever core is pinned, and a breaking change surfaces as an ordinary compile error instead of a clear
+version message.
