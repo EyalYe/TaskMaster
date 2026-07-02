@@ -131,10 +131,24 @@ source "$HOME/.espressif/tools/activate_idf_v6.0.1.sh"
 Then:
 ```bash
 idf.py set-target esp32c3              # first time only
+rm -f managed_components/lvgl__lvgl/CMakePresets.json   # see gotcha below
 idf.py build                           # build
 idf.py -p <PORT> flash monitor         # flash over USB-C + open serial @ 115200
 ```
 Find `<PORT>` with `ls /dev/cu.*` (the XIAO's native USB shows as `/dev/cu.usbmodem*`).
+
+**Gotchas (all hit in practice):**
+- **LVGL build error** — the managed `lvgl/lvgl` component drops a stray `CMakePresets.json`
+  that breaks the build; delete it before each `idf.py build` (the line above). Harmless if absent.
+- **Port doesn't appear / `flash` can't connect** — the C3's **native USB drops when the device is
+  in light/deep sleep** (only `/dev/cu.Bluetooth*` etc. show). Put it in **download mode**: hold
+  **BOOT**, tap **RESET**, release **BOOT**, then flash. (While iterating, `Settings → Deep sleep → Off`
+  avoids this.) Re-check with `ls /dev/cu.*`.
+- **Wrong target after deleting `sdkconfig`** — it resets to `esp32`; re-run `idf.py set-target esp32c3`.
+- **Changed an app repo's code** — re-fetch it so the build isn't stale:
+  `rm -rf managed_components/tm_* dependencies.lock` then rebuild.
+- **`pyserial` for ad-hoc scripts** lives in the IDF venv:
+  `/Users/yeminie/.espressif/tools/python/v6.0.1/venv/bin/python`.
 
 ### Provision the device
 

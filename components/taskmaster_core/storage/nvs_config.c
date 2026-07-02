@@ -26,6 +26,7 @@ static const cfg_field_t s_schema[] = {
     { "deep_sleep",  CFG_U8,   CFG_WP_SETTINGS,   false,    0, "Deep sleep",            0, NULL  },
     { "idle_to_s",   CFG_U16,  CFG_WP_SETTINGS,   false,    0, "Inactivity timeout s",  0, NULL  },
     { "bright",      CFG_U8,   CFG_WP_SETTINGS,   false,    0, "Brightness %",        100, NULL  },
+    { "fahrenheit",  CFG_U8,   CFG_WP_SETTINGS,   false,    0, "Temp in Fahrenheit",    0, NULL  },
     { "provisioned", CFG_U8,   CFG_WP_SYSTEM,     false,    0, "Provisioned flag",      0, NULL  },
 };
 #define SCHEMA_COUNT (sizeof(s_schema) / sizeof(s_schema[0]))

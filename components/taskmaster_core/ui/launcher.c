@@ -1,13 +1,17 @@
 /*
  * launcher.c — the app list, built on the generic ui_list widget (PLAN §6.1, §8.5).
  *
- * Proves ui_list is task-agnostic: the Launcher is just a title + a ui_list of app
- * names + an inline connectivity line. The right hint bar is OS-drawn (ui_frame).
+ * Proves ui_list is task-agnostic: the Launcher is a title + a ui_list of app names,
+ * plus a bottom status bar (connectivity glyph + time + weather, when online with a
+ * city set, §6C). The right hint bar is OS-drawn (ui_frame).
  */
 #include "launcher.h"
 
 #include "app_manager.h"
 #include "net_status.h"
+#include "nvs_config.h"
+#include "wx.h"
+#include "hint_glyphs.h"
 #include "ui_frame.h"
 #include "ui_list.h"
 
@@ -22,6 +26,30 @@ static const control_hints_t LAUNCHER_HINTS = { .rotate = "<>", .click = "OPN", 
 #define LIST_ROWS          (UI_ROWS - 2)             /* rows between title and net */
 #define LAUNCHER_LINE_MAX  20  /* max chars per rendered line */
 #define LAUNCHER_MAX_APPS  16  /* matches app_manager's registry cap */
+
+/* Bottom status bar: connectivity glyph (left) + local time + temperature, and a
+ * weather glyph (right). */
+#define STATUS_GLYPH_X     0
+#define STATUS_GLYPH_Y     1              /* nudge down to sit on the text baseline */
+#define STATUS_TIME_X      19             /* local time, after the connectivity glyph */
+#define STATUS_TEMP_X      58             /* temperature (own label, independent of time) */
+#define STATUS_TEXT_DY     4              /* drop time/temp onto the glyph line */
+#define STATUS_WX_X        (CONTENT_W - 17)  /* weather glyph near the right edge */
+#define STATUS_WX_GLYPH_Y  2              /* drop the weather glyph onto the text line */
+#define WX_DAY_START_H     6              /* local hour [6,19) → day glyph, else night */
+#define WX_DAY_END_H       19
+
+/* WMO weather code → a 1-bit weather glyph (day/night picks the partly-cloudy art). */
+static const lv_image_dsc_t *weather_glyph(int code, bool day)
+{
+    if (code == 0) {
+        return &glyph_wx_sun;                                    /* clear */
+    }
+    if (code <= 3 || code == 45 || code == 48) {                 /* cloudy / overcast / fog */
+        return day ? &glyph_wx_cloud_day : &glyph_wx_cloud_night;
+    }
+    return &glyph_wx_rain;                                       /* any precipitation */
+}
 
 static ui_list_t s_list;
 
@@ -66,13 +94,31 @@ void launcher_render(void)
         ui_list_draw(&s_list, LIST_FIRST_ROW, launcher_row_text, NULL);
     }
 
-    /* Inline connectivity indicator (no OS status bar, §6). No task/sync state —
-     * tasks are userspace (§8); core shows only net status. */
-    net_status_t ns;
-    net_status_get(&ns);
-    char bar[LAUNCHER_LINE_MAX];
-    snprintf(bar, sizeof(bar), "net: %s", net_state_str(ns.state));
-    ui_text_row(LAUNCHER_NET_ROW, bar);
+    /* Status bar on the BOTTOM row (§6C): always a connectivity glyph —
+     * connected / not-connected — plus local time + weather when online and they're
+     * ready (a city is set). */
+    int y = LAUNCHER_NET_ROW * UI_ROW_H;
+    bool online = net_is_online();
+    ui_image(STATUS_GLYPH_X, y + STATUS_GLYPH_Y,
+             online ? &glyph_connected : &glyph_not_connected);
+
+    char tstr[8];
+    int temp = 0, code = 0;
+    if (online && wx_time_str(tstr, sizeof(tstr)) && wx_weather(&temp, &code)) {
+        /* Temperature in the user's unit (Settings → Units). Open-Meteo gives °C. */
+        uint8_t fahrenheit = 0;
+        config_get_u8("fahrenheit", &fahrenheit);
+        int shown = fahrenheit ? temp * 9 / 5 + 32 : temp;
+
+        ui_text(STATUS_TIME_X, y + STATUS_TEXT_DY, tstr);   /* local time */
+        char tmp[8];
+        snprintf(tmp, sizeof(tmp), "%d%c", shown, fahrenheit ? 'F' : 'C');
+        ui_text(STATUS_TEMP_X, y + STATUS_TEXT_DY, tmp);    /* temperature, own position */
+
+        int hour = (tstr[0] - '0') * 10 + (tstr[1] - '0');
+        bool day = (hour >= WX_DAY_START_H && hour < WX_DAY_END_H);
+        ui_image(STATUS_WX_X, y + STATUS_WX_GLYPH_Y, weather_glyph(code, day));
+    }
 }
 
 void launcher_open(void)

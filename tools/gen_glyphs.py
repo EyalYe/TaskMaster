@@ -18,19 +18,31 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# name -> (svg under icons/, target square px, alpha threshold 0..255).
+# name -> (file under icons/ (.svg or .png), target square px, alpha threshold 0..255).
 # Sizes fit the hint cells: Home box ~16 px tall, encoder rotate cell ~12 px.
+_WX = "--Streamline-Sharp-Streamline-Material.png"
 GLYPHS = {
-    "home":   ("home.svg",   14, 80),
-    "scroll": ("scroll.svg", 12, 80),
+    "home":          ("home.svg",          14, 80),
+    "scroll":        ("scroll.svg",        12, 80),
+    "connected":     ("connected.svg",     12, 80),   # Wi-Fi arcs (status bar)
+    "not_connected": ("not_connected.svg", 12, 80),   # Wi-Fi with a slash
+    # Weather (status bar), downscaled from 48px PNGs → thresholded 1-bit.
+    "wx_sun":         ("Sunny" + _WX,             13, 120),
+    "wx_cloud_day":   ("Partly-Cloudy-Day" + _WX, 13, 120),
+    "wx_cloud_night": ("Partly-Cloudy-Night" + _WX, 13, 120),
+    "wx_rain":        ("Rainy" + _WX,             13, 120),
 }
 
 
-def rasterize(svg, px, thresh):
-    png = cairosvg.svg2png(url=os.path.join(ROOT, "icons", svg),
-                           output_width=px, output_height=px)
-    im = Image.open(io.BytesIO(png)).convert("RGBA")
-    a = im.split()[3]                       # alpha marks where the strokes drew
+def rasterize(src, px, thresh):
+    if src.lower().endswith(".svg"):
+        png = cairosvg.svg2png(url=os.path.join(ROOT, "icons", src),
+                               output_width=px, output_height=px)
+        im = Image.open(io.BytesIO(png)).convert("RGBA")
+    else:  # a raster (PNG) — load + downscale to the target
+        im = Image.open(os.path.join(ROOT, "icons", src)).convert("RGBA")
+        im = im.resize((px, px), Image.LANCZOS)
+    a = im.split()[3]                       # alpha marks where the shape is drawn
     rows = []
     for y in range(im.height):
         rows.append("".join("X" if a.getpixel((x, y)) >= thresh else "."

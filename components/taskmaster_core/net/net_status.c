@@ -62,6 +62,14 @@ void net_status_set(net_state_t state, int rssi)
     }
 }
 
+void net_status_notify(void)
+{
+    if (s_ui_q != NULL) {
+        input_event_t ev = EV_SYS_NET_CHANGED;
+        xQueueSend(s_ui_q, &ev, 0);   /* poke the UI to re-render (e.g. wx updated) */
+    }
+}
+
 const char *net_state_str(net_state_t s)
 {
     switch (s) {

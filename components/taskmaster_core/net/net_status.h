@@ -50,3 +50,4 @@ const char *net_state_str(net_state_t s);
 void net_status_init(void);                      /* create the lock (boot)        */
 void net_status_attach_ui(QueueHandle_t ui_q);   /* where change events are posted */
 void net_status_set(net_state_t state, int rssi);/* update + notify the UI on change*/
+void net_status_notify(void);                    /* poke the UI to re-render (no state change) */

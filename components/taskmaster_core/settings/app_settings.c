@@ -324,6 +324,23 @@ static void deep_sleep_set(void *ctx, int on)
     config_set_u8("deep_sleep", on ? 1 : 0);
 }
 
+/* ── units (ENUM): temperature shown in Celsius or Fahrenheit (status bar) ── */
+static const char *const UNIT_CHOICES[] = { "Celsius", "Fahrenheit" };
+
+static int units_get(void *ctx)
+{
+    (void)ctx;
+    uint8_t v = 0;
+    config_get_u8("fahrenheit", &v);
+    return v ? 1 : 0;
+}
+
+static void units_set(void *ctx, int v)
+{
+    (void)ctx;
+    config_set_u8("fahrenheit", v ? 1 : 0);
+}
+
 /* ── web config (TOGGLE): serve the config form on the station IP (§7A) ── */
 static int webcfg_get(void *ctx)
 {
@@ -470,8 +487,8 @@ static void act_ota(void *ctx)
 /* The declared settings table — add a setting here, not a new screen (§8A.1 step 0).
  * Indexed so a row's runtime bits (e.g. dynamic ENUM choices) can be filled in init. */
 enum {
-    SI_WIFI, SI_SETUP, SI_WEBCFG, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_TIMEOUT,
-    SI_DEEPSLEEP, SI_UPDATE, SI_DELETE, SI_RESTART, SI_FACTORY, SI_COUNT
+    SI_WIFI, SI_SETUP, SI_WEBCFG, SI_DEVICE_INFO, SI_STARTUP, SI_BRIGHT, SI_UNITS,
+    SI_TIMEOUT, SI_DEEPSLEEP, SI_UPDATE, SI_DELETE, SI_RESTART, SI_FACTORY, SI_COUNT
 };
 static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_WIFI]        = { .label = "Wi-Fi",       .kind = SETTING_TOGGLE,
@@ -487,6 +504,9 @@ static setting_item_t SETTINGS_ITEMS[SI_COUNT] = {
     [SI_BRIGHT]      = { .label = "Brightness",  .kind = SETTING_RANGE,
                          .get = bright_get, .set = bright_set,
                          .min = BRIGHT_MIN, .max = BRIGHT_MAX, .step = BRIGHT_STEP, .unit = "%" },
+    [SI_UNITS]       = { .label = "Units",       .kind = SETTING_ENUM,
+                         .get = units_get, .set = units_set,
+                         .choices = UNIT_CHOICES, .choice_count = 2 },
     [SI_TIMEOUT]     = { .label = "Timeout",     .kind = SETTING_ENUM,
                          .get = timeout_get, .set = timeout_set,
                          .choices = TIMEOUT_LABELS, .choice_count = TIMEOUT_COUNT },

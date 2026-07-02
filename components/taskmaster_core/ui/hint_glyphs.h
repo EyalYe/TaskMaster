@@ -5,3 +5,9 @@
 
 extern const lv_image_dsc_t glyph_home;
 extern const lv_image_dsc_t glyph_scroll;
+extern const lv_image_dsc_t glyph_connected;
+extern const lv_image_dsc_t glyph_not_connected;
+extern const lv_image_dsc_t glyph_wx_sun;
+extern const lv_image_dsc_t glyph_wx_cloud_day;
+extern const lv_image_dsc_t glyph_wx_cloud_night;
+extern const lv_image_dsc_t glyph_wx_rain;

@@ -192,6 +192,7 @@ static void wx_task(void *arg)
             if (ok && s_have_wx) {
                 char hhmm[8];
                 if (wx_time_str(hhmm, sizeof(hhmm))) ESP_LOGI(TAG, "local time %s", hhmm);
+                net_status_notify();                   /* re-render the status bar now */
                 wait_ms = WX_REFRESH_MS;               /* success → long refresh */
             }
         }

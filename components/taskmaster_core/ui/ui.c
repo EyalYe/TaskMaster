@@ -19,7 +19,8 @@
 
 static const char *TAG = "ui";
 
-#define UI_BLANK_POLL_MS 1000   /* loop cadence while the panel is blanked (await input) */
+#define UI_BLANK_POLL_MS   1000   /* loop cadence while the panel is blanked (await input) */
+#define UI_LAUNCHER_TICK_MS 15000 /* re-render the Launcher this often so its clock ticks */
 
 typedef enum { MODE_LAUNCHER, MODE_APP } ui_mode_t;
 
@@ -28,6 +29,7 @@ static const device_app_t *s_initial_app;   /* boot app, NULL = Launcher */
 /* Inactivity blanking (§8A step 4): blank the panel after idle_to_s of no user input;
  * the next user press wakes it (and is consumed). System events don't count as input. */
 static uint32_t s_last_input_ms;
+static uint32_t s_last_launcher_ms;  /* last periodic Launcher re-render (status-bar clock) */
 static bool     s_blanked;
 static bool     s_sleep_inhibited;   /* true while OTA (etc.) must keep the CPU + panel up */
 
@@ -140,6 +142,12 @@ static void ui_task(void *arg)
 
         if (xQueueReceive(q, &ev, pdMS_TO_TICKS(next)) != pdTRUE) {
             maybe_blank();               /* idle → blank the panel (§8A) */
+            /* Tick the Launcher status-bar clock/weather while it's on screen. */
+            if (mode == MODE_LAUNCHER && !s_blanked &&
+                now_ms() - s_last_launcher_ms >= UI_LAUNCHER_TICK_MS) {
+                launcher_render();
+                s_last_launcher_ms = now_ms();
+            }
             continue;
         }
 

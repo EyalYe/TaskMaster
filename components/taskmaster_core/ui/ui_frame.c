@@ -123,6 +123,16 @@ lv_obj_t *ui_text(int x, int y, const char *txt)
     return l;
 }
 
+lv_obj_t *ui_image(int x, int y, const lv_image_dsc_t *dsc)
+{
+    lv_obj_t *img = lv_image_create(s_content);
+    lv_image_set_src(img, dsc);
+    lv_obj_set_style_image_recolor(img, lv_color_white(), 0);   /* 1-bit A1 → white */
+    lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
+    lv_obj_set_pos(img, x, y);
+    return img;
+}
+
 lv_obj_t *ui_text_row(int row, const char *txt)
 {
     return ui_text(0, row * UI_ROW_H, txt);

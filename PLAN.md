@@ -392,9 +392,14 @@ weather). Verify each step on hardware.
      (§7A.12): Settings **Web config** toggle serves the pre-filled form on the station IP; edit the
      city, Save → applies live (no reboot) and `wx_refresh()` re-geocodes within seconds. *(Remaining
      wart for step 6: an unrecognized city name silently yields no weather — add a "not found" hint.)*
-5. **Launcher status bar.** A top strip on the **Launcher only** (apps unaffected): connectivity glyph +
-   local time + weather — shown **only when online + city set**; offline / Wi-Fi-off / no-city → today's
-   plain list. Composes steps 2+4.
+5. **Launcher status bar. ✅ Done + verified on hardware.** A **bottom** strip on the Launcher only
+   (apps unaffected): a connectivity glyph (`connected` / `not_connected`, always shown) + local time +
+   temperature + a **weather glyph** (Sunny / Partly-Cloudy day·night by local hour / Rainy, from the
+   `icons/` PNGs), the time/weather shown when online with a city set. A **Units** ENUM (Settings) picks
+   **°C/°F**. `ui_image()` draws 1-bit glyphs in the content area; `wx` pokes the UI (`net_status_notify`)
+   the moment weather lands so it appears without waiting, and a 15 s idle tick advances the clock. The
+   old inline `net:` line is gone. *(gen_glyphs.py now rasterizes PNGs too; snow maps to the rain glyph
+   until a Snowy icon is added.)*
 6. **Cohesion pass.** Consistent glyphs/hints across Launcher + Settings + task apps; graceful
    API-error / Wi-Fi-loss screens; tidy loose ends so core feels finished.
 

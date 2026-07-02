@@ -36,6 +36,9 @@ lv_obj_t *ui_text(int x, int y, const char *txt);
 /* Same, positioned at text `row` (0..UI_ROWS-1), x=0 — apps avoid pixel math. */
 lv_obj_t *ui_text_row(int row, const char *txt);
 
+/* A 1-bit glyph (LVGL A1 image, e.g. from hint_glyphs.h) at pixel (x, y), white. */
+lv_obj_t *ui_image(int x, int y, const lv_image_dsc_t *dsc);
+
 /* Like ui_text_row, but spans the content width and **auto-scrolls** (back/forth)
  * when the text is wider than the row — for long titles/SSIDs/URLs (§8.2). */
 lv_obj_t *ui_text_row_scroll(int row, const char *txt);
