@@ -15,9 +15,10 @@ bar (time · weather · connectivity), works offline, and updates over the air.
 
 | Repo | Role | Notes |
 |---|---|---|
-| **TaskMaster** (this repo) | The **sealed OS core** + the core-dev project | `components/taskmaster_core` is the reusable OS component, pulled by others as a **git dependency**. Also builds standalone for core development. |
+| **TaskMaster** (this repo) | The **sealed OS core**, semver-tagged (`v1.0`…`v1.2.1`) | `components/taskmaster_core` is the reusable OS component, pulled by others as a **git dependency** (pinned by tag). Also builds standalone for core development. |
 | **TM-Template** | The **fork target** for app developers | Thin project: `apps.yaml`, compose hook, `app_skeleton`, CI, local tools. Pulls `taskmaster_core` via git. Devs fork **this**, never core. |
-| **TM-YappLocal** / **TM-YappCloud** | Example task apps | Each is a self-registering app component in its own repo (device app in the `app/` subdir). |
+| **TM-Pomodoro** | Example app (own repo) | Full-screen graphical work/break timer; drove app-API **1.1** (`tick_ms`) + **1.2** (`EV_SELECT_LONG`). |
+| **TM-ToDo** | Example app (own repo) | Two apps (Cloud=Todoist / Local=LAN) sharing a header-only `todo_common` library; `apps.yaml` picks one. Supersedes the old TM-YappLocal / TM-YappCloud. |
 
 **The immutability model:** app authors fork **TM-Template** and edit only **`apps.yaml`** (+ their own
 app folder). `taskmaster_core` is a pinned git dependency they never fork or edit. The public headers in
@@ -80,11 +81,17 @@ Partitions: 4 MB flash, dual-slot OTA (`ota_0` @ 0x20000, `ota_1` @ 0x200000).
 
 ## Status (2026-07-02)
 
-- **Phases 0–5 complete + verified on hardware:** bring-up, core OS, LVGL UI + tasks/offline, Settings
-  hub + power/OTA, and core-UX (glyph hint bar, weather/time, status bar, LAN config page).
-- **Phase 6 in progress (§6E build order):** ✅ app composition (`apps.yaml`), ✅ §6D onboarding
-  (TM-Template + CI + local flash/OTA tools, LAN OTA verified). Remaining: app-API versioning (semver),
-  per-app NVS budgets + namespace hardening, a documented "GPIO is the app's risk" note, a Pomodoro
-  example app.
+**All planned phases (0–6) are complete + verified on hardware** (BLE provisioning is deliberately
+parked):
+- **0–5:** bring-up → core OS → LVGL UI + tasks/offline → Settings hub + power/OTA → core-UX (glyph hint
+  bar, weather/time, status bar, LAN config page).
+- **6 — external developers + platform:** `apps.yaml` composition (core sealed + git-pinned), semver
+  app-API (`TASKMASTER_REQUIRE_API`, build-time checked), per-app NVS budgets + `tm`-prefix namespace
+  hardening, GPIO-is-your-risk (docs only), zero-hosting onboarding (fork template + CI + local flash/OTA
+  tools), and the example apps.
 
-See `PLAN.md` §14 for the phase table and §6C.1/§6E for the stepped build logs.
+**App-API release history** (each a backward-compatible, example-driven addition, git-tagged):
+`v1.1.0` `tick_ms` (periodic re-render) · `v1.2.0` `EV_SELECT_LONG` (long-press Select) · `v1.2.1`
+Settings → Delete-data lists *all* saved app data (an `app_store` namespace registry, seeded from NVS).
+
+See `PLAN.md` §14 for the phase table and §6E/§6F for the Phase-6 build log + example/release history.

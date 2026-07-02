@@ -41,4 +41,7 @@ fork TM-Template → edit apps.yaml / add an app folder → push
 - `esp_idf_version: v6.0.1`, `target: esp32c3`. The `command` runs `idf.py reconfigure` (fetch), removes
   the lvgl `CMakePresets.json`, `idf.py build`, then `idf.py merge-bin`.
 - **Private app repos** need a `GH_PAT` secret + the (commented) git-auth step; public repos need
-  nothing. Core, TM-YappCloud, TM-Template are all public.
+  nothing. Core, TM-Template, TM-Pomodoro, TM-ToDo are all public.
+- **Action versions must be Node 24:** `actions/checkout@v5`, `actions/upload-artifact@v6` (v5 of
+  upload-artifact is still Node 20). The artifact ships the merged image (`flash.py --bin`) + the app
+  image (`ota_serve.py`).

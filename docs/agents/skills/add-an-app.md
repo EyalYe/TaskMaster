@@ -13,8 +13,8 @@ core:                                   # the sealed OS — pin a version, never
 apps:
   - name: app_skeleton                  # in-tree app (this repo's apps/)
     path: apps/app_skeleton
-  - name: tm_yapp                        # an app from its own repo
-    git: https://github.com/EyalYe/TM-YappCloud.git
+  - name: my_app                         # an app from its own repo
+    git: https://github.com/you/my_app.git
     path: app                            # the app's subdir inside that repo
     version: main                        # branch, tag, or commit (aliases: branch/tag/ref)
 ```
@@ -58,6 +58,9 @@ constructor isn't dropped by the linker).
   change, so just read it in `render()`.
 - **`async_job.h`** — run blocking I/O off the UI task; the result callback runs back on the UI task.
   Cancel is **cooperative** (poll `async_job_cancelled()`); never tear down a client handle cross-thread.
+- **`app.h`** extras — `.tick_ms` (app-API 1.1) re-renders you every N ms for a clock/timer/animation;
+  `EV_SELECT_LONG` (1.2) is a long-press on Select. If you use these, `TASKMASTER_REQUIRE_API(1, 2)` and
+  pin a core `version:` ≥ that. (Full contract + version table: `docs/APP_API.md`.)
 
 ## Rules
 

@@ -116,8 +116,10 @@ components/taskmaster_core/    the OS: app framework + platform services (task-a
 apps/app_hello/                in-tree example user app (demo / leak-test canary)
 ```
 
-Task apps live in their **own repos** (`TM-YappLocal`, `TM-YappCloud`) and depend only on the public
-app API + display — core and apps version independently. Adding/removing an app needs **no core edits**.
+Apps live in their **own repos** (fork [TM-Template](https://github.com/EyalYe/TM-Template); see the
+[TM-Pomodoro](https://github.com/EyalYe/TM-Pomodoro) / [TM-ToDo](https://github.com/EyalYe/TM-ToDo)
+examples) and depend only on the public app API + display — core and apps version independently. Adding
+or removing an app needs **no core edits**.
 App-author guide: [`docs/APP_API.md`](docs/APP_API.md).
 
 ## Coding conventions
@@ -195,14 +197,16 @@ edited** to add an app (PLAN §6E):
 apps:
   - name: app_hello                   # in-tree example (this repo)
     path: apps/app_hello
-  - name: tm_local                    # external app from its own repo, app/ subdir
-    git: git@github.com:EyalYe/TM-YappLocal.git
+  - name: my_app                      # external app from its own repo, app/ subdir
+    git: https://github.com/you/my_app.git
     path: app
-    # version: main                   # optional: pin a branch, tag, or commit
+    version: v1.0.0                   # branch, tag, or commit
 ```
 
 The component manager fetches each remote into `managed_components/`, and the app **self-registers** —
 **no core edits**. Comment an entry out to remove that app; leave `apps:` empty to ship just Settings.
+(App development normally happens by forking **[TM-Template](https://github.com/EyalYe/TM-Template)**;
+this section covers this repo's own dev/test builds. Worked examples: **TM-Pomodoro**, **TM-ToDo**.)
 Each app declares its own config (URLs/tokens) via `TASKMASTER_REGISTER_APP_CONFIG`, so core never
 hardcodes app fields (PLAN §9.4).
 
