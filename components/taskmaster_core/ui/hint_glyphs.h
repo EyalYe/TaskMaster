@@ -4,7 +4,6 @@
 #include "lvgl.h"
 
 extern const lv_image_dsc_t glyph_home;
-extern const lv_image_dsc_t glyph_scroll;
 extern const lv_image_dsc_t glyph_connected;
 extern const lv_image_dsc_t glyph_not_connected;
 extern const lv_image_dsc_t glyph_wx_sun;
@@ -16,3 +15,4 @@ extern const lv_image_dsc_t glyph_check;
 extern const lv_image_dsc_t glyph_select;
 extern const lv_image_dsc_t glyph_menu;
 extern const lv_image_dsc_t glyph_reset;
+extern const lv_image_dsc_t glyph_back;

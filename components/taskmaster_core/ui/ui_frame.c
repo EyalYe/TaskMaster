@@ -14,12 +14,11 @@
 static bool      s_inited;
 static lv_obj_t *s_content;
 static lv_obj_t *s_bar;          /* transparent full-screen layer holding the boxes */
-static lv_obj_t *s_rotate_lbl;
-static lv_obj_t *s_rotate_img;   /* scroll glyph shown for the default rotate hint */
+static lv_obj_t *s_click_box;    /* the Encoder-push box (hidden when it duplicates Select) */
 static lv_obj_t *s_click_lbl;
-static lv_obj_t *s_click_img;    /* glyph shown for a known click token (e.g. DON) */
+static lv_obj_t *s_click_img;    /* glyph shown for a known click token (e.g. MNU) */
 static lv_obj_t *s_select_lbl;
-static lv_obj_t *s_select_img;   /* glyph shown for a known Select token (e.g. OPN) */
+static lv_obj_t *s_select_img;   /* glyph shown for a known Select token (e.g. DON) */
 
 static lv_obj_t *make_box(lv_obj_t *parent, int x, int y, int w, int h)
 {
@@ -63,7 +62,8 @@ static const lv_image_dsc_t *hint_action_glyph(const char *s)
     if (strcmp(s, "DON") == 0 || strcmp(s, "OK") == 0) return &glyph_check;  /* done / confirm */
     if (strcmp(s, "OPN") == 0 || strcmp(s, "SEL") == 0) return &glyph_select;
     if (strcmp(s, "MNU") == 0) return &glyph_menu;     /* menu / detail */
-    if (strcmp(s, "RST") == 0) return &glyph_reset;    /* reset / back */
+    if (strcmp(s, "RST") == 0) return &glyph_reset;    /* reset */
+    if (strcmp(s, "BAK") == 0) return &glyph_back;     /* back */
     return NULL;
 }
 
@@ -100,36 +100,27 @@ void ui_frame_init(void)
     lv_obj_set_pos(s_bar, 0, 0);
     lv_obj_set_size(s_bar, OLED_W, OLED_H);
 
-    /* Home (OS-fixed) — the house glyph. */
-    lv_obj_t *home = make_box(s_bar, HINT_BAR_X, HINT_HOME_Y, HINT_BAR_W, HINT_HOME_H);
-    lv_obj_align(make_glyph(home, &glyph_home), LV_ALIGN_CENTER, HINT_LBL_DX, 0);
+    /* Three equal boxes, one per button — content centered in each. */
 
-    /* Encoder — split into rotate (top) / click (bottom) by a divider at mid.
-     * Rotate cell shows the scroll glyph by default, or the app's text label.
-     * Nudge the two toward the divider (rotate down, click up). */
-    lv_obj_t *enc = make_box(s_bar, HINT_BAR_X, HINT_ENC_Y, HINT_BAR_W, HINT_ENC_H);
-    s_rotate_lbl = make_label(enc, "<>");
-    lv_obj_align(s_rotate_lbl, LV_ALIGN_TOP_MID, HINT_LBL_DX, HINT_ROT_DY);
-    s_rotate_img = make_glyph(enc, &glyph_scroll);
-    lv_obj_align(s_rotate_img, LV_ALIGN_TOP_MID, HINT_LBL_DX, HINT_ROT_GLYPH_DY);
-    lv_obj_t *divln = lv_obj_create(enc);
-    lv_obj_remove_style_all(divln);
-    lv_obj_set_size(divln, HINT_BAR_W - 2 * HINT_BOX_GAP, HINT_BOX_GAP);
-    lv_obj_align(divln, LV_ALIGN_TOP_MID, 0, HINT_ENC_SPLIT_DY);
-    lv_obj_set_style_bg_color(divln, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(divln, LV_OPA_COVER, 0);
+    /* Home (OS-fixed) — the house glyph. */
+    lv_obj_t *home = make_box(s_bar, HINT_BAR_X, HINT_HOME_Y, HINT_BAR_W, HINT_BOX_H);
+    lv_obj_center(make_glyph(home, &glyph_home));
+
+    /* Encoder push — the app's click action (glyph if the token maps, else text). */
+    lv_obj_t *enc = make_box(s_bar, HINT_BAR_X, HINT_ENC_Y, HINT_BAR_W, HINT_BOX_H);
+    s_click_box = enc;
     s_click_lbl = make_label(enc, "");
-    lv_obj_align(s_click_lbl, LV_ALIGN_BOTTOM_MID, HINT_LBL_DX, -HINT_CLICK_DY);
-    s_click_img = make_glyph(enc, &glyph_check);
-    lv_obj_align(s_click_img, LV_ALIGN_BOTTOM_MID, HINT_GLYPH_DX, -HINT_CLICK_DY + HINT_GLYPH_DY);
+    lv_obj_center(s_click_lbl);
+    s_click_img = make_glyph(enc, &glyph_menu);
+    lv_obj_center(s_click_img);
     lv_obj_add_flag(s_click_img, LV_OBJ_FLAG_HIDDEN);
 
-    /* Select. */
-    lv_obj_t *sel = make_box(s_bar, HINT_BAR_X, HINT_SEL_Y, HINT_BAR_W, HINT_SEL_H);
+    /* Select — the app's select action. */
+    lv_obj_t *sel = make_box(s_bar, HINT_BAR_X, HINT_SEL_Y, HINT_BAR_W, HINT_BOX_H);
     s_select_lbl = make_label(sel, "");
-    lv_obj_align(s_select_lbl, LV_ALIGN_CENTER, HINT_LBL_DX, 0);
-    s_select_img = make_glyph(sel, &glyph_select);
-    lv_obj_align(s_select_img, LV_ALIGN_CENTER, HINT_GLYPH_DX, HINT_GLYPH_DY);
+    lv_obj_center(s_select_lbl);
+    s_select_img = make_glyph(sel, &glyph_check);
+    lv_obj_center(s_select_img);
     lv_obj_add_flag(s_select_img, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_add_flag(s_bar, LV_OBJ_FLAG_HIDDEN);   /* hidden until an app sets hints */
@@ -204,18 +195,16 @@ void ui_frame_set_hints(const control_hints_t *h)
         lv_obj_set_size(s_content, OLED_W, OLED_H);     /* full width */
         return;
     }
-    /* Rotate cell: the scroll glyph for the default hint (NULL or "<>"), else the
-     * app's text label (§6C.1 step 1 — text stays the fallback). */
-    bool rot_glyph = (h->rotate == NULL) || (strcmp(h->rotate, "<>") == 0);
-    if (rot_glyph) {
-        lv_obj_add_flag(s_rotate_lbl, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(s_rotate_img, LV_OBJ_FLAG_HIDDEN);
+    /* Middle + bottom boxes = the encoder-push + Select actions (glyph or text);
+     * rotate isn't drawn (it always scrolls). Home is fixed. If the encoder-push and
+     * Select do the same thing, drop the redundant middle box and show only Select. */
+    bool dup = (h->click && h->select && strcmp(h->click, h->select) == 0);
+    if (dup) {
+        lv_obj_add_flag(s_click_box, LV_OBJ_FLAG_HIDDEN);   /* hides its label + glyph too */
     } else {
-        lv_label_set_text(s_rotate_lbl, h->rotate);
-        lv_obj_remove_flag(s_rotate_lbl, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_rotate_img, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_click_box, LV_OBJ_FLAG_HIDDEN);
+        set_action_hint(s_click_lbl, s_click_img, h->click);
     }
-    set_action_hint(s_click_lbl,  s_click_img,  h->click);
     set_action_hint(s_select_lbl, s_select_img, h->select);
     lv_obj_remove_flag(s_bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_size(s_content, CONTENT_W, OLED_H);      /* leave room for the bar */

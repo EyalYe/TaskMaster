@@ -121,16 +121,17 @@ knob/Select do *right now* — you just declare the labels and call one function
   left of it. Draw your rows first, then set the hints (setting hints sizes the content width).
 - **Full screen** (`ui_frame_set_hints(NULL)`) → you own the whole 128 px width.
 
-Three boxes, top → bottom: **Home** (OS-fixed, always "back to Launcher"), **Encoder** (rotate over
-push), **Select**. Declare labels (≤3 chars) with `control_hints_t` (`hint_bar.h`):
+**Three equal boxes, one per button**, top → bottom: **Home** (OS-fixed, always "back to Launcher"),
+**Encoder-push** (your `.click`), **Select** (your `.select`). Encoder *rotation* is **not** shown —
+it always scrolls, so it needs no hint (`.rotate` is ignored, kept only for source compatibility).
+Declare labels (≤3 chars) with `control_hints_t` (`hint_bar.h`):
 
 ```c
 #include "ui_frame.h"   // pulls in hint_bar.h (control_hints_t)
 
 static const control_hints_t HINTS = {
-    .rotate = "<>",    // encoder rotate → top cell    (NULL = default glyph)
-    .click  = "OPN",   // encoder push   → bottom cell (NULL = hide)
-    .select = "DON",   // Select button  → bottom box  (NULL = hide)
+    .click  = "MNU",   // encoder push  → middle box (NULL = empty)
+    .select = "DON",   // Select button → bottom box (NULL = empty)
 };
 
 static void my_render(void) {
@@ -142,6 +143,30 @@ static void my_render(void) {
 
 **Home still works** as the physical escape hatch regardless of the bar. Re-publish hints whenever your
 app changes mode (e.g. a list vs. a detail submenu) so the bar always matches the current controls.
+
+**If `.click` and `.select` are the same string**, the OS drops the redundant middle box and shows the
+action once (on Select) — so a screen where the encoder-push and Select do the same thing reads as just
+**Home + Select**.
+
+#### Glyphs vs. text
+
+Each box shows a **1-bit glyph** for a set of conventional tokens, and falls back to your **≤3-char
+text** for anything else (so any label is safe — it just renders as text if there's no glyph):
+
+| Token | Glyph | Meaning |
+|---|---|---|
+| `DON`, `OK` | ✓ check | complete / confirm |
+| `OPN`, `SEL` | select | open / select |
+| `MNU` | ☰ menu | menu / detail |
+| `RST` | ↺ reset | reset |
+| `BAK` | ← back | back |
+
+Prefer these tokens when they fit your action, so the whole device speaks one visual language; use plain
+text (e.g. `"SYN"`, `"+/-"`) otherwise. **Adding a new glyph** is a core change, not an app one: drop a
+square icon (SVG or PNG, dark-on-transparent) into `icons/`, add one line to `tools/gen_glyphs.py`
+(name, file, target px, alpha threshold), run it to regenerate `ui/hint_glyphs.[ch]` (it prints an ASCII
+preview), and map the token in `ui_frame.c`'s `hint_action_glyph()`. The status-bar weather/connectivity
+glyphs come from the same pipeline.
 
 ## 5. Reading platform status — connectivity
 

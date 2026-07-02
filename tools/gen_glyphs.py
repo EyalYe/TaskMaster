@@ -22,8 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Sizes fit the hint cells: Home box ~16 px tall, encoder rotate cell ~12 px.
 _WX = "--Streamline-Sharp-Streamline-Material.png"
 GLYPHS = {
-    "home":          ("home.svg",          14, 80),
-    "scroll":        ("scroll.svg",        12, 80),
+    "home":          ("home.svg",          14, 80),   # Home box (hint bar)
     "connected":     ("connected.svg",     12, 80),   # Wi-Fi arcs (status bar)
     "not_connected": ("not_connected.svg", 12, 80),   # Wi-Fi with a slash
     # Weather (status bar), downscaled from 48px PNGs → thresholded 1-bit.
@@ -32,11 +31,13 @@ GLYPHS = {
     "wx_cloud_night": ("Partly-Cloudy-Night" + _WX, 13, 120),
     "wx_rain":        ("Rainy" + _WX,             13, 120),
     "wx_snow":        ("Snow-Flake--Streamline-Micro.png", 13, 120),
-    # Hint-bar action glyphs (click / Select cells).
-    "check":          ("Check--Streamline-Ultimate.png",      11, 120),  # DON (complete)
-    "select":         ("Select-All--Streamline-Ultimate.png", 11, 120),  # OPN / SEL
-    "menu":           ("Navigation-Menu-1--Streamline-Ultimate.png", 11, 120),      # MNU
-    "reset":          ("Triangle-Arrow-Rotate-Left-4--Streamline-Flex.png", 11, 120),  # RST
+    # Hint-bar action glyphs (Encoder-push / Select boxes) — 14px leaves ~1px padding
+    # inside the 20px boxes.
+    "check":          ("Check--Streamline-Ultimate.png", 14, 120),  # DON / OK
+    "select":         ("select.png", 14, 120),  # OPN / SEL
+    "menu":           ("menu.png",   14, 120),  # MNU
+    "reset":          ("reset.png",  14, 120),  # RST
+    "back":           ("back.png",   14, 120),  # BAK
 }
 
 
