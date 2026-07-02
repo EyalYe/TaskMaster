@@ -17,7 +17,9 @@ static lv_obj_t *s_bar;          /* transparent full-screen layer holding the bo
 static lv_obj_t *s_rotate_lbl;
 static lv_obj_t *s_rotate_img;   /* scroll glyph shown for the default rotate hint */
 static lv_obj_t *s_click_lbl;
+static lv_obj_t *s_click_img;    /* glyph shown for a known click token (e.g. DON) */
 static lv_obj_t *s_select_lbl;
+static lv_obj_t *s_select_img;   /* glyph shown for a known Select token (e.g. OPN) */
 
 static lv_obj_t *make_box(lv_obj_t *parent, int x, int y, int w, int h)
 {
@@ -48,6 +50,36 @@ static lv_obj_t *make_glyph(lv_obj_t *parent, const lv_image_dsc_t *dsc)
     lv_obj_set_style_image_recolor(img, lv_color_white(), 0);
     lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);
     return img;
+}
+
+/* Map a click/Select hint token to a glyph, or NULL to keep the ≤3-char text
+ * (§6C.1: glyph where one exists, text is always the fallback). Core recognizes a
+ * few conventional tokens; apps needn't change (an unmapped label just shows text). */
+static const lv_image_dsc_t *hint_action_glyph(const char *s)
+{
+    if (s == NULL) {
+        return NULL;
+    }
+    if (strcmp(s, "DON") == 0) return &glyph_check;    /* complete / done */
+    if (strcmp(s, "OPN") == 0 || strcmp(s, "SEL") == 0) return &glyph_select;
+    if (strcmp(s, "MNU") == 0) return &glyph_menu;     /* menu / detail */
+    if (strcmp(s, "RST") == 0) return &glyph_reset;    /* reset / back */
+    return NULL;
+}
+
+/* Show either the token's glyph (if mapped) or its text in a hint cell. */
+static void set_action_hint(lv_obj_t *lbl, lv_obj_t *img, const char *s)
+{
+    const lv_image_dsc_t *g = hint_action_glyph(s);
+    if (g != NULL) {
+        lv_image_set_src(img, g);
+        lv_obj_remove_flag(img, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_label_set_text(lbl, s ? s : "");
+        lv_obj_remove_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void ui_frame_init(void)
@@ -88,11 +120,17 @@ void ui_frame_init(void)
     lv_obj_set_style_bg_opa(divln, LV_OPA_COVER, 0);
     s_click_lbl = make_label(enc, "");
     lv_obj_align(s_click_lbl, LV_ALIGN_BOTTOM_MID, HINT_LBL_DX, -HINT_CLICK_DY);
+    s_click_img = make_glyph(enc, &glyph_check);
+    lv_obj_align(s_click_img, LV_ALIGN_BOTTOM_MID, HINT_GLYPH_DX, -HINT_CLICK_DY + HINT_GLYPH_DY);
+    lv_obj_add_flag(s_click_img, LV_OBJ_FLAG_HIDDEN);
 
     /* Select. */
     lv_obj_t *sel = make_box(s_bar, HINT_BAR_X, HINT_SEL_Y, HINT_BAR_W, HINT_SEL_H);
     s_select_lbl = make_label(sel, "");
     lv_obj_align(s_select_lbl, LV_ALIGN_CENTER, HINT_LBL_DX, 0);
+    s_select_img = make_glyph(sel, &glyph_select);
+    lv_obj_align(s_select_img, LV_ALIGN_CENTER, HINT_GLYPH_DX, HINT_GLYPH_DY);
+    lv_obj_add_flag(s_select_img, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_add_flag(s_bar, LV_OBJ_FLAG_HIDDEN);   /* hidden until an app sets hints */
     s_inited = true;
@@ -177,8 +215,8 @@ void ui_frame_set_hints(const control_hints_t *h)
         lv_obj_remove_flag(s_rotate_lbl, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_rotate_img, LV_OBJ_FLAG_HIDDEN);
     }
-    lv_label_set_text(s_click_lbl,  h->click  ? h->click  : "");
-    lv_label_set_text(s_select_lbl, h->select ? h->select : "");
+    set_action_hint(s_click_lbl,  s_click_img,  h->click);
+    set_action_hint(s_select_lbl, s_select_img, h->select);
     lv_obj_remove_flag(s_bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_size(s_content, CONTENT_W, OLED_H);      /* leave room for the bar */
 }

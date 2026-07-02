@@ -11,3 +11,8 @@ extern const lv_image_dsc_t glyph_wx_sun;
 extern const lv_image_dsc_t glyph_wx_cloud_day;
 extern const lv_image_dsc_t glyph_wx_cloud_night;
 extern const lv_image_dsc_t glyph_wx_rain;
+extern const lv_image_dsc_t glyph_wx_snow;
+extern const lv_image_dsc_t glyph_check;
+extern const lv_image_dsc_t glyph_select;
+extern const lv_image_dsc_t glyph_menu;
+extern const lv_image_dsc_t glyph_reset;

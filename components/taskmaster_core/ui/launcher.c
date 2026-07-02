@@ -48,7 +48,10 @@ static const lv_image_dsc_t *weather_glyph(int code, bool day)
     if (code <= 3 || code == 45 || code == 48) {                 /* cloudy / overcast / fog */
         return day ? &glyph_wx_cloud_day : &glyph_wx_cloud_night;
     }
-    return &glyph_wx_rain;                                       /* any precipitation */
+    if ((code >= 71 && code <= 77) || code == 85 || code == 86) {
+        return &glyph_wx_snow;                                   /* snow / snow showers */
+    }
+    return &glyph_wx_rain;                                       /* drizzle / rain / showers / storm */
 }
 
 static ui_list_t s_list;

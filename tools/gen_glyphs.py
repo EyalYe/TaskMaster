@@ -31,6 +31,12 @@ GLYPHS = {
     "wx_cloud_day":   ("Partly-Cloudy-Day" + _WX, 13, 120),
     "wx_cloud_night": ("Partly-Cloudy-Night" + _WX, 13, 120),
     "wx_rain":        ("Rainy" + _WX,             13, 120),
+    "wx_snow":        ("Snow-Flake--Streamline-Micro.png", 13, 120),
+    # Hint-bar action glyphs (click / Select cells).
+    "check":          ("Check--Streamline-Ultimate.png",      11, 120),  # DON (complete)
+    "select":         ("Select-All--Streamline-Ultimate.png", 11, 120),  # OPN / SEL
+    "menu":           ("Navigation-Menu-1--Streamline-Ultimate.png", 11, 120),      # MNU
+    "reset":          ("Triangle-Arrow-Rotate-Left-4--Streamline-Flex.png", 11, 120),  # RST
 }
 
 
