@@ -460,9 +460,9 @@ contract**; nothing here lets an app reach into it.
    even flash a mismatched image): an app states its need with `TASKMASTER_REQUIRE_API(maj, min)` — a
    `_Static_assert` (same major, ≥ minor) that fails the build with a clear message pointing at
    `apps.yaml` if the pinned core is incompatible. The running version is logged at boot and shown in
-   **Settings → Device info** (`app-API: 1.0`). Bump MAJOR for a breaking change, MINOR for a compatible
-   addition; core + apps version independently. *(Documented in APP_API §11; the template skeleton uses
-   `TASKMASTER_REQUIRE_API`.)*
+   **Settings → Device info**. Bump MAJOR for a breaking change, MINOR for a compatible addition; core +
+   apps version independently. *(Documented in APP_API §11; the skeleton uses `TASKMASTER_REQUIRE_API`.
+   The API has since grown to 1.2 via example-driven additions + tagged releases — see §6F.)*
 3. **Per-app NVS budgets + namespace hardening. ✅ Done.** `app_store` now bounds each app's use of the
    shared ~24 KB NVS pool so a runaway can't crowd out other apps or provisioning: a single value ≤
    `APP_STORE_MAX_VALUE_BYTES` (8 KB), and once a namespace hits `APP_STORE_MAX_ENTRIES` (~320 entries,
@@ -477,14 +477,50 @@ contract**; nothing here lets an app reach into it.
    **risk is documented** (a pin conflict, or grabbing a core-owned pin, is on the app author) in
    `docs/APP_API.md` + `platform/board_pins.h`. *(Cheap; can land alongside step 1.)*
 5. **Pomodoro example app. ✅ Done — [TM-Pomodoro](https://github.com/EyalYe/TM-Pomodoro).** A complete
-   non-task app (work/break timer, live 1 Hz countdown, knob-editable lengths) in its **own public
-   repo**, built from the app template (composition hook, CI, local flash/OTA tools, agent docs) with
-   core pinned at **`v1.1.0`** — a third proof of the external-app path, and core untouched. It needed a
-   periodic re-render, which drove a **backward-compatible API addition**: `device_app_t.tick_ms`
-   (app-API **1.1**) — the OS re-renders an active app every `tick_ms`. The app declares
-   `TASKMASTER_REQUIRE_API(1, 1)`, exercising the versioning end to end. Verified on hardware.
-6. **§6D onboarding** — the new template repo + GitHub CI + local Python flash/OTA tools; make
-   `taskmaster_core` git-consumable; allow `http://` on the OTA path for local updates.
+   non-task app in its **own public repo**, built from the app template with core pinned by tag — a
+   proof of the external-app path, core untouched. It grew into a **full-screen graphical** app (two
+   circles that shrink with the time left, raw LVGL, no hint bar) and drove **two** backward-compatible
+   API additions: `tick_ms` (**1.1**, live countdown) and `EV_SELECT_LONG` (**1.2**, long-press reset).
+   Declares `TASKMASTER_REQUIRE_API(1, 2)` and pins core `v1.2.0`. See §6F for the full example family +
+   release history. Verified on hardware.
+6. **§6D onboarding. ✅ Done + verified on hardware.** The sealed core became a **git-consumable
+   component** (bootstrap moved into `taskmaster_run()`; `main` is a 3-line stub). A separate **template
+   repo** (the fork target) pulls it via `apps.yaml`; **GitHub Actions** builds a `.bin` on push; **local
+   Python tools** flash over USB (`tools/flash.py`, esptool-only) and host OTA over the LAN
+   (`tools/ota_serve.py`) — the OTA path now accepts `http://` for local updates
+   (`CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP`, cert bundle only for https). The maintainer hosts nothing. The
+   full loop (fork → edit `apps.yaml` → CI build → local flash → LAN OTA) was verified on the device.
+
+### 6F. Phase 6 — shipped, examples & release history
+
+**Phase 6 is complete.** The platform is three repos plus a family of example apps; the core is a
+**sealed, semver-tagged** dependency that apps pin.
+
+**Repos (all public, github.com/EyalYe):**
+- **TaskMaster** — the sealed OS core (this repo), pulled as a git dependency.
+- **TM-Template** — the fork-and-build starting point (`app_skeleton` + composition hook + CI + local
+  tools + agent docs); its README links the examples.
+- **TM-Pomodoro** — a **full-screen graphical** work/break timer: two circles that shrink with the time
+  left, drawn with raw LVGL and **no hint bar**. Rotate to focus, click to edit, Select to start
+  (Work → Break auto-follows), long-press Select to reset.
+- **TM-ToDo** — **two apps sharing one library, pick one**: `app_cloud` (Todoist/HTTPS) + `app_local`
+  (LAN server) over a shared header-only `todo_common` component (task view + offline cache + write
+  queue in one place); `apps.yaml` selects which app ships. Supersedes the old TM-YappLocal/YappCloud.
+
+**App-API growth (each a backward-compatible addition, driven by a real example, tagged):**
+- **v1.0** — the base contract (composition, versioning macros `TM_API_VERSION_*` +
+  `TASKMASTER_REQUIRE_API`, per-app NVS budgets + `tm`-prefix namespace hardening).
+- **v1.1.0** — `device_app_t.tick_ms`: the OS re-renders an active app every `tick_ms` (clocks/timers/
+  animations). Drove TM-Pomodoro's live countdown.
+- **v1.2.0** — `EV_SELECT_LONG`: long-press on Select (held ~0.7 s; the short press then fires on
+  release). Drove TM-Pomodoro's reset.
+- **v1.2.1** — patch: **Settings → Delete data** now lists **all** saved app data via an `app_store`
+  namespace registry (seeded from existing NVS), so data from an uninstalled app is still deletable —
+  never touching core (`tm*`) or system (dotted) namespaces. No API change.
+
+Versioning is proven end-to-end: an app declares `TASKMASTER_REQUIRE_API(maj, min)` and pins a core
+`version:` tag in `apps.yaml`; an incompatible pin fails the build with a clear message. Core and apps
+evolve independently.
 
 ### Apps — core (built-in, non-removable) vs. user (manifest-driven, removable)
 

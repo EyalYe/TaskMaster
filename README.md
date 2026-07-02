@@ -17,9 +17,24 @@ progress. The current stepped plan lives in [`PLAN.md`](PLAN.md).
 | **3** | **LVGL UI + tasks in userspace** — Todoist (direct HTTPS) and LAN task apps; offline cache + write replay; the Settings hub | ✅ |
 | **4** | **Settings hub** (schema-driven) + power/idle (blank, light sleep) + **OTA update** | ✅ |
 | **5** | **Core UX completion** — Launcher status bar (time · weather · connectivity, °C/°F) + glyph hint bar + keyless weather/time + in-browser LAN config + cohesion | ✅ |
-| **6** | **External developers + platform** — GPIO arbitration, per-app NVS budgets, sandboxing, example app, API versioning, zero-toolchain onboarding | ◀ next |
+| **6** | **External developers + platform** — `apps.yaml` composition (core sealed + git-pinned), semver app-API, per-app NVS budgets + namespace hardening, zero-hosting onboarding (fork template + CI + local flash/OTA tools), worked example apps | ✅ |
 
 *(BLE provisioning is parked — a nicety over the no-app SoftAP form; revisit if iOS setup becomes a pain.)*
+
+## Write apps for it (this core is a sealed dependency)
+
+You never fork or edit this repo to build apps — it's the immutable OS, pulled as a **git-pinned
+dependency**. Fork the template, edit one file (`apps.yaml`), and ship:
+
+- **[TM-Template](https://github.com/EyalYe/TM-Template)** — fork-and-build starting point (skeleton app,
+  composition hook, CI, local flash/OTA tools, agent docs).
+- **[TM-Pomodoro](https://github.com/EyalYe/TM-Pomodoro)** — a full-screen graphical timer (raw LVGL,
+  the `tick_ms` + long-press API additions).
+- **[TM-ToDo](https://github.com/EyalYe/TM-ToDo)** — two apps sharing one library, pick one (Todoist or
+  a LAN server).
+
+The app contract is [`docs/APP_API.md`](docs/APP_API.md); the core is tagged semver
+(`v1.0` → `v1.2.1`) so apps pin a version. See PLAN §6 / §6E–§6F.
 
 ## What the device does today (Phase 5)
 
