@@ -16,9 +16,10 @@ idf_component_register(
         "ui/launcher.c"
         "ui/lv_font_tm_sans.c"
         "ui/lv_font_tm5x7.c"
-        # app/ — app framework: registry + background-job service
+        # app/ — app framework: registry + background-job service + OS entry point
         "app/app_manager.c"
         "app/async_job.c"
+        "app/taskmaster.c"
         # storage/ — device config schema + per-app storage + app-declared config
         "storage/nvs_config.c"
         "storage/app_store.c"
@@ -54,6 +55,7 @@ idf_component_register(
         lwip
         nvs_flash
         esp_timer
+        app_update         # esp_ota_mark_app_valid_cancel_rollback() in taskmaster.c
         esp_app_format     # esp_app_get_description() for the Device-info screen
         esp_https_ota      # OTA update from fw_url (Settings → Check update, step 7)
         bootloader_support # pulled in by esp_https_ota.h (bootloader_common.h)
