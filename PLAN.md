@@ -463,8 +463,15 @@ contract**; nothing here lets an app reach into it.
    **Settings → Device info** (`app-API: 1.0`). Bump MAJOR for a breaking change, MINOR for a compatible
    addition; core + apps version independently. *(Documented in APP_API §11; the template skeleton uses
    `TASKMASTER_REQUIRE_API`.)*
-3. **Per-app NVS budgets + namespace-collision hardening.** Bound each app's `app_store` usage and make
-   namespace collisions impossible/detected, so one app can't exhaust NVS or stomp another's keys (§9.3).
+3. **Per-app NVS budgets + namespace hardening. ✅ Done.** `app_store` now bounds each app's use of the
+   shared ~24 KB NVS pool so a runaway can't crowd out other apps or provisioning: a single value ≤
+   `APP_STORE_MAX_VALUE_BYTES` (8 KB), and once a namespace hits `APP_STORE_MAX_ENTRIES` (~320 entries,
+   ~10 KB) **new keys are rejected** — but updates to existing keys still succeed, so re-saving a cache
+   never breaks or loses data (a 50-item task cache ≈ 6 KB fits comfortably). **Hardening:** the **`tm`
+   prefix is reserved** (app ids can't start with `tm`), so app data can never collide with the `tmcfg`
+   device-config namespace (Wi-Fi creds/tokens) or future core namespaces; a hashed long id colliding
+   with `tmcfg` is also rejected. Device info shows pool usage (`NVS: used/total`). Documented in
+   APP_API §6.
 4. **GPIO is the app's own risk (docs only — no arbitration service).** We deliberately *do not* build
    an `app_gpio` claim/release service. Apps may use the free pads (D6–D9 + shared I²C) directly; the
    **risk is documented** (a pin conflict, or grabbing a core-owned pin, is on the app author) in

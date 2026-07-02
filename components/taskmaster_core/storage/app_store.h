@@ -18,7 +18,8 @@
  * Namespace ids: NVS caps a namespace at 15 chars. Ids of 1..15 chars are used
  * verbatim (human-readable); longer ids (e.g. a repo slug) are hashed down to a
  * 15-char namespace automatically — so you can pass any length. Keys are always
- * limited to 15 chars by NVS.
+ * limited to 15 chars by NVS. The core reserves the "tm" prefix (it owns the tmcfg
+ * device-config namespace) — pick an id that does not start with "tm".
  *
  * Collision note: distinct ids almost never map to the same namespace, but it is
  * *theoretically* possible — a literal short id could equal another id's hash, or
@@ -32,6 +33,20 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+
+/* ── Per-app budget (PLAN §6E step 3) ───────────────────────────────────────
+ * All apps + device config share one ~24 KB NVS pool, so an app can't be allowed to
+ * grow without bound and crowd out other apps (or provisioning). Two limits, enforced
+ * by set_*:
+ *   - a single value may be at most APP_STORE_MAX_VALUE_BYTES;
+ *   - once a namespace reaches APP_STORE_MAX_ENTRIES used NVS entries, **new** keys are
+ *     rejected (ESP_ERR_NO_MEM) — but **updates to existing keys still succeed**, so an
+ *     app that re-saves the same keys (e.g. a cache blob) never breaks and never loses
+ *     data. To free space, erase keys.
+ * Generous enough for real apps (a 50-item task cache ≈ 6 KB fits); tight enough that a
+ * runaway is bounded to roughly a third of the pool. */
+#define APP_STORE_MAX_ENTRIES     320     /* used NVS entries per namespace (~10 KB) */
+#define APP_STORE_MAX_VALUE_BYTES 8192    /* max bytes in one str/blob value */
 
 typedef struct {
     uint32_t handle;   /* opaque (an nvs_handle_t) */

@@ -19,6 +19,7 @@
 #include "net_status.h"
 #include "wx.h"
 #include "nvs_config.h"
+#include "nvs.h"          /* nvs_get_stats for the Device-info NVS line */
 #include "app_manager.h"
 #include "app_config.h"
 #include "app_store.h"
@@ -193,6 +194,12 @@ static void gather_info(void)
 
     snprintf(L[s_info_n++], INFO_LINE_MAX, "Heap: %u KB",
              (unsigned)(esp_get_free_heap_size() / 1024));
+
+    nvs_stats_t nst;
+    if (nvs_get_stats(NULL, &nst) == ESP_OK) {   /* shared NVS pool (config + all apps) */
+        snprintf(L[s_info_n++], INFO_LINE_MAX, "NVS: %u/%u",
+                 (unsigned)nst.used_entries, (unsigned)nst.total_entries);
+    }
 
     uint32_t up_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
     snprintf(L[s_info_n++], INFO_LINE_MAX, "Up: %um %us", (unsigned)(up_s / 60),

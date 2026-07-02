@@ -14,8 +14,11 @@
 
 static const char *TAG = "app_store";
 
-/* Reserved: the core device-config namespace (nvs_config.c). Off-limits to apps. */
-#define CORE_NS "tmcfg"
+/* Reserved: the core device-config namespace (nvs_config.c), and the "tm" prefix that
+ * owns it — off-limits to apps so an app can never collide with core/platform data
+ * (Wi-Fi creds, tokens, settings), now or as core grows. */
+#define CORE_NS        "tmcfg"
+#define CORE_NS_PREFIX "tm"
 
 /* Hash a too-long id into a deterministic ≤15-char NVS namespace: 64-bit FNV-1a
  * encoded base36. 2^64 in base36 needs 13 digits, so this always fits. */
@@ -55,14 +58,20 @@ esp_err_t app_store_open(app_store_t *st, const char *id)
     char ns[16];
     if (n <= 15) {
         memcpy(ns, id, n + 1);
+        /* Reserve the "tm" prefix for core/platform namespaces. */
+        if (strncmp(ns, CORE_NS_PREFIX, strlen(CORE_NS_PREFIX)) == 0) {
+            ESP_LOGE(TAG, "namespace id '%s' uses the reserved '%s' prefix", ns, CORE_NS_PREFIX);
+            return ESP_ERR_INVALID_ARG;
+        }
     } else {
         hash_namespace(id, ns);
         ESP_LOGD(TAG, "id '%s' -> hashed namespace '%s'", id, ns);
-    }
-
-    if (strcmp(ns, CORE_NS) == 0) {
-        ESP_LOGE(TAG, "namespace '%s' is reserved for device config", ns);
-        return ESP_ERR_INVALID_ARG;
+        /* A hashed id colliding with core config is astronomically unlikely, but reject
+         * it rather than share Wi-Fi creds' namespace. */
+        if (strcmp(ns, CORE_NS) == 0) {
+            ESP_LOGE(TAG, "namespace '%s' collides with reserved device config", ns);
+            return ESP_ERR_INVALID_ARG;
+        }
     }
     nvs_handle_t h;
     esp_err_t err = nvs_open(ns, NVS_READWRITE, &h);
@@ -92,6 +101,27 @@ static esp_err_t check(const app_store_t *st, const char *key)
     return ESP_OK;
 }
 
+/* Enforce the per-app entry budget (§6E step 3): once the namespace is full, reject a
+ * NEW key — but let updates to an existing key through (no data loss, cache re-saves
+ * keep working). Returns ESP_OK if the write may proceed. */
+static esp_err_t budget_ok(nvs_handle_t h, const char *key)
+{
+    size_t used = 0;
+    if (nvs_get_used_entry_count(h, &used) != ESP_OK) {
+        return ESP_OK;                      /* can't measure → don't block */
+    }
+    if (used < APP_STORE_MAX_ENTRIES) {
+        return ESP_OK;                      /* room to spare */
+    }
+    nvs_type_t type;
+    if (nvs_find_key(h, key, &type) == ESP_OK) {
+        return ESP_OK;                      /* existing key → an update is fine */
+    }
+    ESP_LOGW(TAG, "namespace at budget (%u entries) — new key '%s' rejected",
+             (unsigned)used, key);
+    return ESP_ERR_NO_MEM;
+}
+
 esp_err_t app_store_get_str(app_store_t *st, const char *key, char *out, size_t out_len, const char *def)
 {
     esp_err_t err = check(st, key);
@@ -112,6 +142,12 @@ esp_err_t app_store_set_str(app_store_t *st, const char *key, const char *val)
     esp_err_t err = check(st, key);
     if (err != ESP_OK || val == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(val) >= APP_STORE_MAX_VALUE_BYTES) {
+        return ESP_ERR_INVALID_SIZE;                 /* value too big (§6E step 3) */
+    }
+    if ((err = budget_ok((nvs_handle_t)st->handle, key)) != ESP_OK) {
+        return err;
     }
     err = nvs_set_str((nvs_handle_t)st->handle, key, val);
     if (err == ESP_OK) {
@@ -140,6 +176,9 @@ esp_err_t app_store_set_u32(app_store_t *st, const char *key, uint32_t val)
     if (err != ESP_OK) {
         return err;
     }
+    if ((err = budget_ok((nvs_handle_t)st->handle, key)) != ESP_OK) {
+        return err;
+    }
     err = nvs_set_u32((nvs_handle_t)st->handle, key, val);
     if (err == ESP_OK) {
         err = nvs_commit((nvs_handle_t)st->handle);
@@ -161,6 +200,12 @@ esp_err_t app_store_set_blob(app_store_t *st, const char *key, const void *val, 
     esp_err_t err = check(st, key);
     if (err != ESP_OK || val == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (len > APP_STORE_MAX_VALUE_BYTES) {
+        return ESP_ERR_INVALID_SIZE;                 /* value too big (§6E step 3) */
+    }
+    if ((err = budget_ok((nvs_handle_t)st->handle, key)) != ESP_OK) {
+        return err;
     }
     err = nvs_set_blob((nvs_handle_t)st->handle, key, val, len);
     if (err == ESP_OK) {
