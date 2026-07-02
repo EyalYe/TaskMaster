@@ -6,8 +6,9 @@ translates it into `main/idf_component.yml`, which the ESP-IDF component manager
 A hook in the root CMakeLists runs it before the manager, so the generated file is a
 build artifact you never hand-edit; CI can also call it directly (PLAN §6E step 1).
 
-Deliberately dependency-free (no PyYAML): apps.yaml uses a tiny fixed subset — a list
-under `apps:` of items with `name` + (`path` | `git` [+ `path`]).
+Deliberately dependency-free (no PyYAML): apps.yaml uses a tiny fixed subset — an
+optional `core:` block (the sealed OS, git-pinned) and a list under `apps:` of items
+with `name` + (`path` | `git` [+ `path`] [+ `version`/`branch`/`tag`]).
 """
 import os
 import sys
@@ -24,55 +25,65 @@ HEADER = (
 )
 
 
-def parse_apps(text):
-    """Parse the `apps:` list. Returns a list of dicts. Minimal YAML subset."""
+def parse(text):
+    """Parse apps.yaml → (core dict, apps list). Minimal fixed YAML subset."""
+    core = {}
     apps = []
-    cur = None
-    in_apps = False
+    section = None      # 'core' | 'apps' | None
+    cur = None          # the dict currently being filled
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].rstrip()          # drop comments
         if not line.strip():
             continue
-        if not line.startswith((" ", "\t")) and line.strip() == "apps:":
-            in_apps = True
+        if not line.startswith((" ", "\t")):          # a top-level key
+            key = line.strip().rstrip(":")
+            section = key if key in ("core", "apps") else None
+            cur = core if key == "core" else None
             continue
-        if not in_apps:
+        if section is None:
             continue
         stripped = line.strip()
-        if stripped.startswith("- "):                 # new list item
+        if section == "apps" and stripped.startswith("- "):
             cur = {}
             apps.append(cur)
             stripped = stripped[2:].strip()           # first key sits on the dash line
         if cur is None or ":" not in stripped:
             continue
-        key, val = stripped.split(":", 1)
-        cur[key.strip()] = val.strip()
-    return apps
+        k, v = stripped.split(":", 1)
+        cur[k.strip()] = v.strip()
+    return core, apps
 
 
-def render(apps):
-    if not apps:
-        # An empty `dependencies:` is invalid YAML; `{}` means "no user apps".
+def emit_dep(name, spec):
+    """One `name: {...}` dependency block for the manager (git or local path)."""
+    out = ["  %s:\n" % name]
+    if "git" in spec:
+        out.append("    git: %s\n" % spec["git"])
+        if spec.get("path"):
+            out.append("    path: %s\n" % spec["path"])     # subdir inside the repo
+        ref = spec.get("version") or spec.get("branch") or spec.get("tag") or spec.get("ref")
+        if ref:
+            out.append("    version: %s\n" % ref)           # branch / tag / commit
+    elif spec.get("path"):
+        # A local path is relative to the repo root; main/ needs it relative to main/.
+        out.append("    path: ../%s\n" % spec["path"].lstrip("/"))
+    else:
+        sys.exit("compose_apps: '%s' needs a 'path' or 'git'" % name)
+    return out
+
+
+def render(core, apps):
+    if not core and not apps:
+        # An empty `dependencies:` is invalid YAML; `{}` means "no deps".
         return HEADER + "dependencies: {}\n"
     lines = [HEADER, "dependencies:\n"]
+    if core:                                            # the sealed OS (template builds)
+        lines += emit_dep("taskmaster_core", core)
     for a in apps:
         name = a.get("name")
         if not name:
             sys.exit("compose_apps: every app needs a 'name' (got %r)" % a)
-        lines.append("  %s:\n" % name)
-        if "git" in a:
-            lines.append("    git: %s\n" % a["git"])
-            if a.get("path"):
-                lines.append("    path: %s\n" % a["path"])   # subdir inside the repo
-            # Optional git ref — a branch, tag, or commit (component-manager `version`).
-            ref = a.get("version") or a.get("branch") or a.get("tag") or a.get("ref")
-            if ref:
-                lines.append("    version: %s\n" % ref)
-        elif a.get("path"):
-            # In-tree path is relative to the repo root; main/ needs it relative to main/.
-            lines.append("    path: ../%s\n" % a["path"].lstrip("/"))
-        else:
-            sys.exit("compose_apps: app '%s' needs a 'path' or 'git'" % name)
+        lines += emit_dep(name, a)
     return "".join(lines)
 
 
@@ -80,8 +91,8 @@ def main():
     if not os.path.exists(SRC):
         sys.exit("compose_apps: %s not found" % SRC)
     with open(SRC, encoding="utf-8") as f:
-        apps = parse_apps(f.read())
-    out = render(apps)
+        core, apps = parse(f.read())
+    out = render(core, apps)
 
     old = ""
     if os.path.exists(OUT):
