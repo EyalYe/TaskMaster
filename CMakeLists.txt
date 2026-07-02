@@ -5,6 +5,9 @@ cmake_minimum_required(VERSION 3.16)
 # BEFORE the component manager (invoked by project.cmake) resolves dependencies.
 # apps.yaml is the only app list you edit; main/idf_component.yml is a generated,
 # git-ignored artifact. Runs on every configure; rewrites only when apps.yaml changed.
+# Register apps.yaml as a configure dependency so editing it forces a reconfigure
+# (→ recompose) — otherwise a plain `idf.py build` wouldn't pick up the change.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/apps.yaml")
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(NOT Python3_EXECUTABLE)
     set(Python3_EXECUTABLE python3)
