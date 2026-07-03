@@ -10,6 +10,7 @@
 #include "leak_test.h"
 #include "lvgl_disp.h"
 #include "ui_frame.h"
+#include "hint_glyphs.h"   /* glyph_lock for the lock screen (§7A) */
 #include "async_job.h"
 #include "nvs_config.h"
 #include "sh1106.h"
@@ -22,6 +23,13 @@ static const char *TAG = "ui";
 #define UI_BLANK_POLL_MS   1000   /* loop cadence while the panel is blanked (await input) */
 #define UI_LAUNCHER_TICK_MS 15000 /* re-render the Launcher this often so its clock ticks */
 
+/* Screen-lock indicator geometry (§7A). */
+#define LOCK_GLYPH_D    22        /* padlock glyph size (matches gen_glyphs) */
+#define LOCK_GLYPH_Y    10        /* padlock top y */
+#define LOCK_TEXT_X     36        /* "hold Home" x (roughly centered) */
+#define LOCK_TEXT_Y     44        /* "hold Home" y */
+#define UNLOCK_FLASH_MS 800       /* how long the open-padlock "unlocked" cue shows */
+
 typedef enum { MODE_LAUNCHER, MODE_APP } ui_mode_t;
 
 static const device_app_t *s_initial_app;   /* boot app, NULL = Launcher */
@@ -32,6 +40,8 @@ static uint32_t s_last_input_ms;
 static uint32_t s_last_launcher_ms;  /* last periodic Launcher re-render (status-bar clock) */
 static uint32_t s_last_app_tick_ms;  /* last periodic active-app re-render (app.tick_ms, API 1.1) */
 static bool     s_blanked;
+static bool     s_locked;            /* screen lock (§7A): input inert until long-press Home */
+static uint32_t s_unlock_flash_ms;   /* >0 while the open-padlock "unlocked" cue is showing */
 static bool     s_sleep_inhibited;   /* true while OTA (etc.) must keep the CPU + panel up */
 
 void ui_inhibit_sleep(bool on) { s_sleep_inhibited = on; }
@@ -41,8 +51,20 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static bool is_user_input(input_event_t ev)
 {
     return ev == EV_ENCODER_CW || ev == EV_ENCODER_CCW || ev == EV_ENCODER_CLICK ||
-           ev == EV_SELECT || ev == EV_SELECT_LONG || ev == EV_HOME;
+           ev == EV_SELECT || ev == EV_SELECT_LONG || ev == EV_HOME || ev == EV_HOME_LONG;
 }
+
+/* Full-screen padlock indicator (§7A). Closed padlock + "hold Home" while locked;
+ * a brief open padlock + "unlocked" as feedback on unlock. */
+static void render_padlock(const lv_image_dsc_t *glyph, const char *hint)
+{
+    lv_obj_clean(ui_frame_content());
+    ui_frame_set_hints(NULL);                          /* full width, no hint bar */
+    ui_image((OLED_W - LOCK_GLYPH_D) / 2, LOCK_GLYPH_Y, glyph);
+    ui_text(LOCK_TEXT_X, LOCK_TEXT_Y, hint);
+}
+
+static void render_lock(void) { render_padlock(&glyph_lock, "hold Home"); }
 
 static void screen_wake(void)
 {
@@ -131,7 +153,7 @@ static void ui_task(void *arg)
             config_get_u8("deep_sleep", &deep);
             if (deep && !s_sleep_inhibited) {
                 ESP_LOGI(TAG, "light sleep");
-                input_light_sleep();
+                input_light_sleep(s_locked);   /* locked → pocket mode (Home wakes only) */
                 ESP_LOGI(TAG, "woke");
             }
             next = UI_BLANK_POLL_MS;
@@ -143,6 +165,19 @@ static void ui_task(void *arg)
 
         if (xQueueReceive(q, &ev, pdMS_TO_TICKS(next)) != pdTRUE) {
             maybe_blank();               /* idle → blank the panel (§8A) */
+            /* The brief "unlocked" cue → then restore the app/Launcher (§7A). */
+            if (s_unlock_flash_ms) {
+                if (s_blanked || now_ms() - s_unlock_flash_ms >= UNLOCK_FLASH_MS) {
+                    s_unlock_flash_ms = 0;
+                    if (!s_blanked) render_current(mode);
+                }
+                continue;
+            }
+            /* Periodic re-renders are suppressed while locked so nothing paints over
+             * the lock screen (§7A). */
+            if (s_locked) {
+                continue;
+            }
             /* Tick the Launcher status-bar clock/weather while it's on screen. */
             if (mode == MODE_LAUNCHER && !s_blanked &&
                 now_ms() - s_last_launcher_ms >= UI_LAUNCHER_TICK_MS) {
@@ -165,6 +200,28 @@ static void ui_task(void *arg)
          * neither wake the screen nor count as activity. */
         if (is_user_input(ev)) {
             s_last_input_ms = now_ms();
+
+            /* Screen lock (§7A): long-press Home toggles it. While locked, every other
+             * input is inert (it may wake the panel, but does nothing). The device still
+             * blanks + light/deep-sleeps under the lock screen. */
+            if (ev == EV_HOME_LONG) {
+                if (s_blanked) screen_wake();
+                s_locked = !s_locked;
+                ESP_LOGI(TAG, "screen %s", s_locked ? "locked" : "unlocked");
+                if (s_locked) {
+                    s_unlock_flash_ms = 0;
+                    render_lock();
+                } else {
+                    render_padlock(&glyph_lock_open, "unlocked");   /* brief cue */
+                    s_unlock_flash_ms = now_ms();
+                }
+                continue;
+            }
+            if (s_locked) {
+                if (s_blanked) { screen_wake(); render_lock(); }
+                continue;
+            }
+
             if (s_blanked) {
                 screen_wake();
                 render_current(mode);
@@ -187,7 +244,7 @@ static void ui_task(void *arg)
          * to an app. The contract is just "your render() gets called" — apps read
          * net_status_get() and redraw (net_status.h). Skip the draw while blanked. */
         if (ev == EV_SYS_NET_CHANGED) {
-            if (!s_blanked) render_current(mode);
+            if (!s_blanked && !s_locked) render_current(mode);
             continue;
         }
 
@@ -195,7 +252,7 @@ static void ui_task(void *arg)
          * blanked), then re-render — but only if the panel is on (async_job.h). */
         if (ev == EV_SYS_JOB_DONE) {
             async_job_deliver();
-            if (!s_blanked) render_current(mode);
+            if (!s_blanked && !s_locked) render_current(mode);
             continue;
         }
 

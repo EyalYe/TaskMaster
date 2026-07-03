@@ -49,7 +49,7 @@ typedef struct {
 static button_t s_buttons[] = {
     { PIN_ENC_SW,     EV_ENCODER_CLICK, 0,              1, 0, 0, false },
     { PIN_BTN_SELECT, EV_SELECT,        EV_SELECT_LONG, 1, 0, 0, false },
-    { PIN_BTN_HOME,   EV_HOME,          0,              1, 0, 0, false },
+    { PIN_BTN_HOME,   EV_HOME,          EV_HOME_LONG,   1, 0, 0, false },
 };
 #define NUM_BUTTONS (sizeof(s_buttons) / sizeof(s_buttons[0]))
 
@@ -111,15 +111,23 @@ static const gpio_num_t s_wake_pins[] = {
 };
 #define NUM_WAKE_PINS (sizeof(s_wake_pins) / sizeof(s_wake_pins[0]))
 
-void input_light_sleep(void)
+void input_light_sleep(bool home_only)
 {
-    for (size_t i = 0; i < NUM_WAKE_PINS; i++) {
-        gpio_wakeup_enable(s_wake_pins[i], GPIO_INTR_LOW_LEVEL);
+    if (home_only) {
+        gpio_wakeup_enable(PIN_BTN_HOME, GPIO_INTR_LOW_LEVEL);   /* pocket mode: Home only */
+    } else {
+        for (size_t i = 0; i < NUM_WAKE_PINS; i++) {
+            gpio_wakeup_enable(s_wake_pins[i], GPIO_INTR_LOW_LEVEL);
+        }
     }
     esp_sleep_enable_gpio_wakeup();
-    esp_light_sleep_start();                 /* halts the CPU until a pin goes LOW */
-    for (size_t i = 0; i < NUM_WAKE_PINS; i++) {
-        gpio_wakeup_disable(s_wake_pins[i]); /* back to normal polling */
+    esp_light_sleep_start();                 /* halts the CPU until a wake pin goes LOW */
+    if (home_only) {
+        gpio_wakeup_disable(PIN_BTN_HOME);
+    } else {
+        for (size_t i = 0; i < NUM_WAKE_PINS; i++) {
+            gpio_wakeup_disable(s_wake_pins[i]); /* back to normal polling */
+        }
     }
 }
 
@@ -175,6 +183,7 @@ const char *input_event_name(input_event_t ev)
         case EV_SELECT:        return "SELECT";
         case EV_SELECT_LONG:   return "SELECT LONG";
         case EV_HOME:          return "HOME";
+        case EV_HOME_LONG:     return "HOME LONG";
         default:               return "?";
     }
 }

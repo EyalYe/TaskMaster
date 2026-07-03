@@ -23,6 +23,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _WX = "--Streamline-Sharp-Streamline-Material.png"
 GLYPHS = {
     "home":          ("home.svg",          14, 80),   # Home box (hint bar)
+    "lock":          ("padlock.png",       22, 120),  # screen-lock indicator (§7A)
+    "lock_open":     ("open-padlock.png",  22, 120),  # brief unlock feedback (§7A)
     "connected":     ("connected.svg",     12, 80),   # Wi-Fi arcs (status bar)
     "not_connected": ("not_connected.svg", 12, 80),   # Wi-Fi with a slash
     # Weather (status bar), downscaled from 48px PNGs → thresholded 1-bit.

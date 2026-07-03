@@ -18,6 +18,7 @@ typedef enum {
     EV_SELECT,          /* Select button (short press, on release) */
     EV_HOME,            /* Home button (OS-reserved, §5.2) */
     EV_SELECT_LONG,     /* Select held (app-API 1.2); short press then arrives on release */
+    EV_HOME_LONG,       /* Home held — OS-reserved (screen lock, §7A); short Home fires on release */
 
     /* System events: posted by core onto the same UI event queue, handled by the
      * UI task, and NEVER delivered to an app's on_event. Apps react by reading the
@@ -36,6 +37,8 @@ bool input_home_held(void);
 /* Human-readable name for logging / on-screen display. */
 const char *input_event_name(input_event_t ev);
 
-/* Enter light sleep until any input pin goes LOW (a press or encoder turn), then
- * return. Called by the UI task on idle when deep sleep is enabled (§8A step 5). */
-void input_light_sleep(void);
+/* Enter light sleep until an input pin goes LOW, then return. `home_only` restricts
+ * the wake source to the Home button — "pocket mode" (§7A): while the screen is locked,
+ * an encoder bump or Select in a pocket won't wake the device; only a Home press does.
+ * Called by the UI task on idle when deep sleep is enabled (§8A step 5). */
+void input_light_sleep(bool home_only);

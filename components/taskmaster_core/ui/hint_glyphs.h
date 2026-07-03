@@ -4,6 +4,8 @@
 #include "lvgl.h"
 
 extern const lv_image_dsc_t glyph_home;
+extern const lv_image_dsc_t glyph_lock;
+extern const lv_image_dsc_t glyph_lock_open;
 extern const lv_image_dsc_t glyph_connected;
 extern const lv_image_dsc_t glyph_not_connected;
 extern const lv_image_dsc_t glyph_wx_sun;
