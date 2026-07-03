@@ -2,8 +2,8 @@
 
 **Codename:** TaskMaster-C3
 **Category:** Single-purpose desktop productivity appliance (ESP-IDF / FreeRTOS / ESP32-C3)
-**Status:** Planning — v0.4 (re-based on ESP-IDF; all key decisions resolved; build-ready)
-**Last updated:** 2026-06-29
+**Status:** Shipping — Phases 0–7 complete + verified on hardware (core **v1.3.0**); ESP-IDF v6.0.1
+**Last updated:** 2026-07-03
 
 > This document supersedes the initial Gemini PRD draft and the earlier Zephyr-based revisions.
 > It keeps the product vision, hardware, and every resolved decision, but targets **ESP-IDF**
@@ -522,13 +522,13 @@ Versioning is proven end-to-end: an app declares `TASKMASTER_REQUIRE_API(maj, mi
 `version:` tag in `apps.yaml`; an incompatible pin fails the build with a clear message. Core and apps
 evolve independently.
 
-### 7A. Phase 7 build order — power + privacy UX
+### 7A. Phase 7 build order — power + privacy UX ✅ shipped (core v1.3.0)
 
-Two device-level features. **Neither changes the app contract** (`TM_API_VERSION` stays; Home events are
-OS-reserved and never reach apps), so they ship in a core **minor release** (e.g. `v1.3.0`) that any
-build can adopt without app changes. Suggested order: **1 (small) → 2 (large)**.
+Two device-level features. **Neither changes the app contract** (`TM_API_VERSION` stays at 1.2; Home
+events are OS-reserved and never reach apps), so they shipped in the core **minor release `v1.3.0`** —
+any build adopts it without app changes. Both steps done + verified on hardware.
 
-1. **Screen lock (long-press Home).**
+1. **Screen lock (long-press Home). ✅ Done + verified on hardware.**
    - **Input:** add `EV_HOME_LONG` by making Home **long-press-capable** — reuse the Phase-6 deferred-edge
      logic already on Select (`input.c`): a plain press now emits the short `EV_HOME` on release, and a
      hold past `LONG_PRESS_MS` emits `EV_HOME_LONG`. Home stays OS-reserved.
@@ -541,7 +541,15 @@ build can adopt without app changes. Suggested order: **1 (small) → 2 (large)*
    - Small + low risk. Verify on hardware: lock/unlock, all buttons inert while locked, blank+wake stays
      locked, sleep still engages.
 
-2. **Battery-grade automatic light-sleep.**
+2. **Battery-grade automatic light-sleep. ✅ Done + verified on hardware.** Shipped as built: input went
+   **interrupt-driven** (encoder decoded in a GPIO ISR; buttons on a wake-on-edge poll task that blocks
+   while released), unblocking tickless idle; `esp_pm_configure(160→40 MHz, light_sleep_enable)` drops the
+   CPU between events with **Wi-Fi retained** via `WIFI_PS_MIN_MODEM`. **Full input wake** (a knob turn *or*
+   a press wakes the CPU) is done with **`esp_pm` light-sleep enter/exit callbacks** that flip the input
+   pins **level-wake ↔ edge-decode** around each auto sleep — the C3's GPIO sleep-wake is level-only and
+   clobbers the encoder's edge decode, so the pins are re-armed each cycle (the proven `input_light_sleep()`
+   dance, now automatic). Pocket/blank manual light-sleep (ui.c) is untouched + independent. Boot confirms
+   `pm … Light sleep: ENABLED`, `wifi: Set ps type: 1`.
    - **The blocker** is the 1 ms input poll (`input_task`) — a constant tick that prevents FreeRTOS
      tickless idle. Convert input to **interrupt-driven**: a GPIO ISR on the encoder A/B edges running the
      Ben-Buxton decode (post events to a queue), and ISR + short debounce (an `esp_timer`) for the
@@ -556,6 +564,43 @@ build can adopt without app changes. Suggested order: **1 (small) → 2 (large)*
    - Large + medium-high risk (input is critical + timing-sensitive). Verify: encoder/buttons stay crisp,
      Wi-Fi stays connected through sleeps, and a real current drop is measurable. **Sets up a future gyro
      wake-on-motion** (another ISR wake source).
+
+### 7C. Audio feedback — passive piezo buzzer (Phase 7 wrap) ◀ next
+
+The final Phase-7 add-on: give the device a **voice** for UI feedback — a click on rotate, a confirm
+beep on task-complete, an error buzz, a Pomodoro end-chime — without breaking the zero-distraction
+appliance ethos. **Decided (2026-07-03): a passive piezo buzzer**, not a speaker. A speaker needs an I²S
+amp (MAX98357A) + 3 pins + audio assets in flash + amp power to manage across the §7A light-sleep — real
+audio the appliance doesn't want. An *active* buzzer is one fixed pitch (every event sounds the same). A
+**passive piezo on one GPIO via LEDC PWM** plays **distinct tones/short melodies** (mono) with an amp-free,
+near-zero-power part — expressive enough to tell events apart, cheap enough to ignore.
+
+**Hardware (BOM add):**
+- **1× passive piezo buzzer** (bare piezo element / transducer — *not* a self-driving "active" buzzer).
+- **1× free GPIO** from the D6–D9 pads (§3 budget has headroom). Documented as **core-reserved** in
+  `board_pins.h` (a core-owned pin — per §6E the app-GPIO risk note, core claims are declared there).
+- **Optional drive stage for volume/GPIO safety:** a small NPN (e.g. MMBT2222) + base resistor (~1 kΩ)
+  and a series resistor, or drive the piezo directly (piezos are high-impedance, low-current — a bare
+  element is usually fine straight off a GPIO at low volume). No flyback needed for a piezo (capacitive,
+  not inductive like a magnetic buzzer). Bake the transistor into the battery-build PCB (§3/§14) if louder.
+
+**Firmware:**
+- A tiny core service `snd` (`platform/snd.[ch]`): **LEDC** timer+channel on the buzzer pin; `snd_tone(freq,
+  ms)` / `snd_play(pattern)` for a few named cues (click / confirm / error / chime). Non-blocking (LEDC runs
+  the tone; an `esp_timer` stops it) so `render()`/`on_event()` never block (§6 contract).
+- **Settings:** a **Sound** on/off toggle (+ maybe volume) in the schema-driven menu (§8A.1) — silent by
+  default is friendly; persists to NVS.
+- **Light-sleep interaction:** trivial — a cue only fires in response to an event, i.e. while awake; LEDC on
+  the APB clock simply idles during auto light-sleep. Nothing to special-case in §7A.
+- **App API (small, backward-compatible):** apps like Pomodoro want the end-chime, so expose a minimal
+  `snd_*` call to userspace → a **MINOR app-API bump to `TM_API 1.3`** (`TASKMASTER_REQUIRE_API(1,3)`),
+  same pattern as Pomodoro's `tick_ms`/`EV_SELECT_LONG` additions (§6F). Core-only UI beeps need no bump;
+  only exposing it to apps does.
+
+**Exit criteria:** rotate/select/complete produce distinct, non-annoying cues; the Settings Sound toggle
+mutes them and persists; Pomodoro rings at session end via the app-API call; no render/input latency
+regression; auto light-sleep still engages between cues. *(This wraps Phase 7; ships as core `v1.3.x`
+if core-only, or `v1.4.0` if it adds the app-facing `snd` API.)*
 
 ### Apps — core (built-in, non-removable) vs. user (manifest-driven, removable)
 
@@ -1515,15 +1560,16 @@ headers, §6) and the **device REST contract** (§8.1).
 | **4.5 — OTA path** ✅ | `esp_https_ota` + rollback | Done: device pulls an image from `fw_url`, boots the new slot, self-confirms / rolls back (verified) |
 | **5 — Core UX completion** ✅ | Tie the core together + finish the shell UI (§6C.1): **glyph hint bar** (the `icons/` 1-bit glyphs replace the ≤3-char text labels, text fallback kept), a **Launcher status bar** (connectivity glyph + **NTP time** + **weather**, °C/°F), an **NTP time** core service + **city** provisioning field + keyless Open-Meteo weather/timezone, a **LAN config page** (edit config in-browser, no re-provision), and a **cohesion pass** — consistent action glyphs + city-"not found" surfacing | Hint boxes show glyphs; the Launcher shows time + weather + connectivity when online with a city (its plain list otherwise); core screens feel consistent — **all verified on hardware** |
 | **6 — External developers + platform** ✅ | Make the platform safe + pleasant to host third-party apps **without ever touching the immutable core** (build order §6E): **app composition** via a user-owned `apps.yaml` + a seamless CMake hook (adding an app never edits a core file); **app-API versioning** (semver); **per-app NVS budget enforcement** + namespace-collision hardening (§9.3); **GPIO left to the app** (documented risk, no arbitration service); a **Pomodoro** removable example *user app* (extensibility proof); and **zero-self-hosting onboarding** (§6D) — a **template repo** the dev forks (core = sealed git dep) + **GitHub Actions** builds on push + **local Python tools** flash (esptool) and host OTA over the LAN (no cloud) | Adding an app never edits core; the app API is versioned; apps can't exhaust NVS or stomp namespaces; a third-party non-task app ships cleanly; **a dev forks a template, and a user flashes once locally then self-updates over the LAN — the maintainer hosts nothing** |
-| **7 — Power + privacy UX** ◀ next | Two device-level features (no app-API change; build order §7A): **screen lock** — long-press **Home** locks the screen and makes all input inert until long-press Home again (integrates with the idle blank + light/deep sleep; shows a padlock); **battery-grade auto light-sleep** — convert input from the 1 ms poll to **interrupt-driven** (GPIO-ISR encoder + debounced buttons) so `esp_pm` tickless idle can auto light-sleep with **Wi-Fi retained** (modem-sleep) | Long-press Home locks/unlocks; locked input is inert (device still blanks/sleeps); the CPU auto light-sleeps between events while staying Wi-Fi-associated — measurable current drop, no input responsiveness regression |
+| **7 — Power + privacy UX** ✅ (core v1.3.0) | Two device-level features (no app-API change; build order §7A): **screen lock** — long-press **Home** locks the screen and makes all input inert until long-press Home again (integrates with the idle blank + light/deep sleep; shows a padlock); **battery-grade auto light-sleep** — convert input from the 1 ms poll to **interrupt-driven** (GPIO-ISR encoder + debounced buttons) so `esp_pm` tickless idle can auto light-sleep with **Wi-Fi retained** (modem-sleep) | **Met + verified on hardware:** long-press Home locks/unlocks; locked input is inert (device still blanks/sleeps); the CPU auto light-sleeps between events while staying Wi-Fi-associated, waking on any turn/press with no input-responsiveness regression |
 | | *(**Future / parked:** **BLE provisioning** (2nd Wi-Fi transport, needs a phone app — nicety over the SoftAP form); **encryption** — NVS + **flash encryption** as an opt-in dev-mode "secured build" (real at-rest protection; first flash + OTA unaffected, only the dev re-flash loop needs key management); and **hardware add-ons** on the free pads (D6–D9 + shared I²C/SPI/UART) — **gyro/IMU** (wake-on-motion pairs with §7A light-sleep, + gestures), **microphone**, **GPS**, **GSM**.)* | |
 
-**Phases 0–6 are complete + verified on hardware.** 0–4.5 = MVP; Phase 5 = core UX completion (Launcher
+**Phases 0–7 are complete + verified on hardware.** 0–4.5 = MVP; Phase 5 = core UX completion (Launcher
 status bar + glyph hint bar + weather/time, §6C.1); Phase 6 = external developers + platform (`apps.yaml`
 composition, semver app-API, per-app NVS budgets + namespace hardening, GPIO-is-your-risk, zero-hosting
-onboarding, worked examples, §6E/§6F). **Phase 7 = power + privacy UX** (screen lock + battery-grade auto
-light-sleep, §7A) is next. Parked/future: BLE provisioning, encryption (opt-in secured build), and
-hardware add-ons (gyro/IMU, microphone, GPS, GSM).
+onboarding, worked examples, §6E/§6F); **Phase 7 = power + privacy UX** (screen lock + battery-grade auto
+light-sleep, §7A) shipped as core **`v1.3.0`**. Next / parked: an **audio feedback** add-on (UI beeps /
+Pomodoro chime, §7C); BLE provisioning; encryption (opt-in secured build); and hardware add-ons (gyro/IMU,
+microphone, GPS, GSM).
 
 > **Current state (2026-06-30):** Phases 0–2 complete and **verified on hardware** (XIAO ESP32-C3) on
 > ESP-IDF v6.0.1. Phase 2 closed end to end: paste-from-phone form → NVS → reboot → **associates with
