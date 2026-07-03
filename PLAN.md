@@ -522,6 +522,41 @@ Versioning is proven end-to-end: an app declares `TASKMASTER_REQUIRE_API(maj, mi
 `version:` tag in `apps.yaml`; an incompatible pin fails the build with a clear message. Core and apps
 evolve independently.
 
+### 7A. Phase 7 build order — power + privacy UX
+
+Two device-level features. **Neither changes the app contract** (`TM_API_VERSION` stays; Home events are
+OS-reserved and never reach apps), so they ship in a core **minor release** (e.g. `v1.3.0`) that any
+build can adopt without app changes. Suggested order: **1 (small) → 2 (large)**.
+
+1. **Screen lock (long-press Home).**
+   - **Input:** add `EV_HOME_LONG` by making Home **long-press-capable** — reuse the Phase-6 deferred-edge
+     logic already on Select (`input.c`): a plain press now emits the short `EV_HOME` on release, and a
+     hold past `LONG_PRESS_MS` emits `EV_HOME_LONG`. Home stays OS-reserved.
+   - **UI (`ui.c`):** a `locked` flag. `EV_HOME_LONG` toggles it. **While locked, ignore every input
+     except `EV_HOME_LONG`**; render a **lock screen** (a padlock glyph + "hold Home" hint). The existing
+     idle-blank + light/deep sleep keep working *underneath* — the device still blanks and sleeps per its
+     settings; a press just wakes to the lock screen (consumed) without acting. Unlock → `render_current`
+     restores the app/Launcher.
+   - **Assets:** a padlock added to `icons/` + `gen_glyphs.py` (`glyph_lock`).
+   - Small + low risk. Verify on hardware: lock/unlock, all buttons inert while locked, blank+wake stays
+     locked, sleep still engages.
+
+2. **Battery-grade automatic light-sleep.**
+   - **The blocker** is the 1 ms input poll (`input_task`) — a constant tick that prevents FreeRTOS
+     tickless idle. Convert input to **interrupt-driven**: a GPIO ISR on the encoder A/B edges running the
+     Ben-Buxton decode (post events to a queue), and ISR + short debounce (an `esp_timer`) for the
+     buttons. No more periodic poll → the scheduler can idle.
+   - **Enable `esp_pm` auto light-sleep:** `CONFIG_PM_ENABLE` + `CONFIG_FREERTOS_USE_TICKLESS_IDLE`, and
+     `esp_pm_configure()` with max/min CPU freq + `light_sleep_enable = true`. The CPU then light-sleeps
+     between events automatically (not just when blanked).
+   - **Keep Wi-Fi up:** `esp_wifi_set_ps(WIFI_PS_MIN_MODEM)` so the STA stays associated across sleeps
+     (wakes for DTIM beacons). LVGL's timer + the input ISRs are the wake sources.
+   - **Config** is project-level (`sdkconfig.defaults` → template + examples). Supersedes / subsumes the
+     manual opt-in light-sleep (§8A) — the `Deep sleep` toggle can stay for the aggressive screen-off case.
+   - Large + medium-high risk (input is critical + timing-sensitive). Verify: encoder/buttons stay crisp,
+     Wi-Fi stays connected through sleeps, and a real current drop is measurable. **Sets up a future gyro
+     wake-on-motion** (another ISR wake source).
+
 ### Apps — core (built-in, non-removable) vs. user (manifest-driven, removable)
 
 Two classes share the one `device_app_t` interface:
@@ -1480,12 +1515,15 @@ headers, §6) and the **device REST contract** (§8.1).
 | **4.5 — OTA path** ✅ | `esp_https_ota` + rollback | Done: device pulls an image from `fw_url`, boots the new slot, self-confirms / rolls back (verified) |
 | **5 — Core UX completion** ✅ | Tie the core together + finish the shell UI (§6C.1): **glyph hint bar** (the `icons/` 1-bit glyphs replace the ≤3-char text labels, text fallback kept), a **Launcher status bar** (connectivity glyph + **NTP time** + **weather**, °C/°F), an **NTP time** core service + **city** provisioning field + keyless Open-Meteo weather/timezone, a **LAN config page** (edit config in-browser, no re-provision), and a **cohesion pass** — consistent action glyphs + city-"not found" surfacing | Hint boxes show glyphs; the Launcher shows time + weather + connectivity when online with a city (its plain list otherwise); core screens feel consistent — **all verified on hardware** |
 | **6 — External developers + platform** ✅ | Make the platform safe + pleasant to host third-party apps **without ever touching the immutable core** (build order §6E): **app composition** via a user-owned `apps.yaml` + a seamless CMake hook (adding an app never edits a core file); **app-API versioning** (semver); **per-app NVS budget enforcement** + namespace-collision hardening (§9.3); **GPIO left to the app** (documented risk, no arbitration service); a **Pomodoro** removable example *user app* (extensibility proof); and **zero-self-hosting onboarding** (§6D) — a **template repo** the dev forks (core = sealed git dep) + **GitHub Actions** builds on push + **local Python tools** flash (esptool) and host OTA over the LAN (no cloud) | Adding an app never edits core; the app API is versioned; apps can't exhaust NVS or stomp namespaces; a third-party non-task app ships cleanly; **a dev forks a template, and a user flashes once locally then self-updates over the LAN — the maintainer hosts nothing** |
-| | *(**Parked / future:** **BLE provisioning** as a 2nd Wi-Fi transport — it needs a dedicated phone app and carries only Wi-Fi creds, so it's a nicety over the no-app SoftAP browser form; revisit if iOS setup becomes a real pain. Direct Todoist + app-declared config were pulled forward to Phase 3.)* | |
+| **7 — Power + privacy UX** ◀ next | Two device-level features (no app-API change; build order §7A): **screen lock** — long-press **Home** locks the screen and makes all input inert until long-press Home again (integrates with the idle blank + light/deep sleep; shows a padlock); **battery-grade auto light-sleep** — convert input from the 1 ms poll to **interrupt-driven** (GPIO-ISR encoder + debounced buttons) so `esp_pm` tickless idle can auto light-sleep with **Wi-Fi retained** (modem-sleep) | Long-press Home locks/unlocks; locked input is inert (device still blanks/sleeps); the CPU auto light-sleeps between events while staying Wi-Fi-associated — measurable current drop, no input responsiveness regression |
+| | *(**Future / parked:** **BLE provisioning** (2nd Wi-Fi transport, needs a phone app — nicety over the SoftAP form); **encryption** — NVS + **flash encryption** as an opt-in dev-mode "secured build" (real at-rest protection; first flash + OTA unaffected, only the dev re-flash loop needs key management); and **hardware add-ons** on the free pads (D6–D9 + shared I²C/SPI/UART) — **gyro/IMU** (wake-on-motion pairs with §7A light-sleep, + gestures), **microphone**, **GPS**, **GSM**.)* | |
 
-Phases 0–4.5 = MVP (**done + verified on hardware**). Phase 5 = **core UX completion** (the Launcher
-status bar + glyph hint bar + tying core together, §6C.1). Phase 6 = **external developers + platform**
-(app_gpio, per-app NVS budgets, sandboxing, a Pomodoro example, API versioning). BLE provisioning is
-**parked** (a nicety over the no-app SoftAP form — revisit if iOS setup hurts).
+**Phases 0–6 are complete + verified on hardware.** 0–4.5 = MVP; Phase 5 = core UX completion (Launcher
+status bar + glyph hint bar + weather/time, §6C.1); Phase 6 = external developers + platform (`apps.yaml`
+composition, semver app-API, per-app NVS budgets + namespace hardening, GPIO-is-your-risk, zero-hosting
+onboarding, worked examples, §6E/§6F). **Phase 7 = power + privacy UX** (screen lock + battery-grade auto
+light-sleep, §7A) is next. Parked/future: BLE provisioning, encryption (opt-in secured build), and
+hardware add-ons (gyro/IMU, microphone, GPS, GSM).
 
 > **Current state (2026-06-30):** Phases 0–2 complete and **verified on hardware** (XIAO ESP32-C3) on
 > ESP-IDF v6.0.1. Phase 2 closed end to end: paste-from-phone form → NVS → reboot → **associates with
