@@ -55,6 +55,7 @@ idf_component_register(
         lwip
         nvs_flash
         esp_timer
+        esp_pm             # auto light-sleep: esp_pm_configure + light-sleep cbs (§7A step 2)
         app_update         # esp_ota_mark_app_valid_cancel_rollback() in taskmaster.c
         esp_app_format     # esp_app_get_description() for the Device-info screen
         esp_https_ota      # OTA update from fw_url (Settings → Check update, step 7)

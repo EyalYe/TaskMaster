@@ -49,6 +49,10 @@ static void ensure_started(void)
 {
     if (!s_started) {
         ESP_ERROR_CHECK(esp_wifi_start());     /* fires STA_START → connect */
+        /* Modem-sleep (§7A step 2): park the radio between DTIM beacons so the STA
+         * stays associated while the CPU auto light-sleeps. Only affects the STA;
+         * the SoftAP portal is unaffected. */
+        ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
         s_started = true;
     }
 }

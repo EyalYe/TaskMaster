@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_ota_ops.h"
+#include "esp_pm.h"
 #include <string.h>
 
 #include "sh1106.h"
@@ -39,6 +40,20 @@ void taskmaster_run(void)
     net_status_init();
     ESP_ERROR_CHECK(config_init());
     ESP_ERROR_CHECK(wifi_mgr_init());   /* one Wi-Fi init shared by STA + the portal */
+
+    /* Automatic light-sleep (§7A step 2): with input now interrupt-driven (no 1ms
+     * poll) the scheduler can idle, so let esp_pm drop the CPU between events. The
+     * modem-sleep set in wifi_mgr keeps the STA associated across sleeps. Kconfig
+     * gates this (CONFIG_PM_ENABLE); a no-op build-wise if PM is disabled. */
+#if CONFIG_PM_ENABLE
+    esp_pm_config_t pm = {
+        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+        .min_freq_mhz = CONFIG_XTAL_FREQ,   /* drop to the crystal freq when idle */
+        .light_sleep_enable = true,
+    };
+    ESP_ERROR_CHECK(esp_pm_configure(&pm));
+    ESP_LOGI(TAG, "auto light-sleep: %d→%d MHz", pm.max_freq_mhz, pm.min_freq_mhz);
+#endif
 
     if (sh1106_init() != ESP_OK) {
         ESP_LOGE(TAG, "OLED init failed — check wiring / I2C address");

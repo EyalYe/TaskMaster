@@ -13,8 +13,21 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # (§6D zero-hosting: tools/ota_serve.py). HTTPS URLs still verify via the cert bundle.
 CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
 
-# --- FreeRTOS: 1kHz tick so the 1ms input poll task is responsive (PLAN §4.6) ---
+# --- FreeRTOS tick (PLAN §4.6). Input is interrupt-driven (§7A step 2), so the tick
+# no longer gates input latency; kept at 1kHz for timer/animation granularity. ---
 CONFIG_FREERTOS_HZ=1000
+
+# --- Power management: battery-grade automatic light-sleep (PLAN §7A step 2) ---
+# Input went interrupt-driven (no 1ms poll), unblocking tickless idle: the scheduler
+# now stops the tick and the CPU auto light-sleeps between events. esp_pm_configure()
+# (taskmaster_run) sets the freq window + light_sleep_enable; Wi-Fi stays associated
+# via WIFI_PS_MIN_MODEM (wifi_mgr). The RTC timer keeps FreeRTOS time across sleeps.
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_ESP_TIMER_IMPL_SYSTIMER=y
+# Light-sleep enter/exit hooks: input.c flips the GPIOs level(wake)↔edge(decode)
+# around each auto sleep so a knob turn or button press wakes the CPU (§7A step 2).
+CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 
 # --- HTTP server: room for the provisioning form POST later ---
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
