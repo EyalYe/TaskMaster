@@ -575,14 +575,22 @@ audio the appliance doesn't want. An *active* buzzer is one fixed pitch (every e
 **passive piezo on one GPIO via LEDC PWM** plays **distinct tones/short melodies** (mono) with an amp-free,
 near-zero-power part — expressive enough to tell events apart, cheap enough to ignore.
 
-**Hardware (BOM add):**
-- **1× passive piezo buzzer** (bare piezo element / transducer — *not* a self-driving "active" buzzer).
+**Hardware (BOM add) — chosen part (2026-07-03):** a **true piezoelectric element (bare 30 mm disc with
+wires)** — passive, so it plays arbitrary tones; **capacitive** (~µA–few mA, a charge/discharge transient),
+so it drives from a GPIO with **no flyback diode** and no mandatory transistor. This is deliberately **not**
+a *magnetic* "passive buzzer" (the common **16 Ω / "AC 3V"** mislabelled-as-piezo part): a 16 Ω coil pulls
+~200 mA at 3.3 V — over the GPIO limit — and being inductive would *require* a driver transistor **plus a
+flyback diode**. The piezo disc avoids both.
+- **1× true piezo disc**, passive/piezoelectric (**not** active/self-driving, **not** a 16 Ω magnetic coil).
 - **1× free GPIO** from the D6–D9 pads (§3 budget has headroom). Documented as **core-reserved** in
   `board_pins.h` (a core-owned pin — per §6E the app-GPIO risk note, core claims are declared there).
-- **Optional drive stage for volume/GPIO safety:** a small NPN (e.g. MMBT2222) + base resistor (~1 kΩ)
-  and a series resistor, or drive the piezo directly (piezos are high-impedance, low-current — a bare
-  element is usually fine straight off a GPIO at low volume). No flyback needed for a piezo (capacitive,
-  not inductive like a magnetic buzzer). Bake the transistor into the battery-build PCB (§3/§14) if louder.
+- **Drive:** `GPIO → LEDC PWM → piezo` directly — one pin, no diode, negligible steady current. A small NPN
+  (e.g. MMBT2222) + ~1 kΩ base resistor + series resistor is **optional**, only to run it off 5 V for more
+  volume; bake it into the battery-build PCB (§3/§14) if wanted.
+- **Mounting matters for volume:** a bare disc is faint in free air — **bond it flat to the inside of the
+  3D-printed enclosure** (or leave a small backing cavity) so the case acts as a soundboard. **Fit check:**
+  30 mm ≈ 1.18" is large for the wedge case — confirm a flat ~30 mm bonding spot, else drop to a **20–27 mm
+  disc or a housed 12 mm piezo** (same passive/tone behaviour, easier to place).
 
 **Firmware:**
 - A tiny core service `snd` (`platform/snd.[ch]`): **LEDC** timer+channel on the buzzer pin; `snd_tone(freq,
