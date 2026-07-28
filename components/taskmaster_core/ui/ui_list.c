@@ -12,6 +12,13 @@
 #define UI_LIST_NOCURSOR  "  "   /* unselected: same width, keeps text aligned */
 #define UI_LIST_SCROLL_PAD "   " /* trailing pad so a scrolling row clears the edge */
 
+/* Selected-row auto-scroll speed. LVGL's default (~40 px/s) reads as too fast on the
+ * small OLED; this is calmer. Encoded as a speed (via lv_anim_speed_clamped) and stored
+ * in the label's anim_duration style, which LV_LABEL_LONG_SCROLL consumes. */
+#define UI_LIST_SCROLL_PX_PER_S 16
+#define UI_LIST_SCROLL_MIN_MS   300
+#define UI_LIST_SCROLL_MAX_MS   10000
+
 void ui_list_init(ui_list_t *l, int visible_rows)
 {
     l->rows  = visible_rows > 0 ? visible_rows : UI_LIST_DEFAULT_ROWS;
@@ -81,5 +88,11 @@ void ui_list_draw(const ui_list_t *l, int y0_row, ui_list_text_fn fn, void *ctx)
         lv_obj_set_size(row, lv_obj_get_width(ui_frame_content()), UI_ROW_H);
         lv_label_set_long_mode(row,
             idx == l->sel ? LV_LABEL_LONG_SCROLL : LV_LABEL_LONG_DOT);
+        if (idx == l->sel) {
+            /* Slow the scroll to a comfortable pace (see UI_LIST_SCROLL_* above). */
+            lv_obj_set_style_anim_duration(row,
+                lv_anim_speed_clamped(UI_LIST_SCROLL_PX_PER_S,
+                                      UI_LIST_SCROLL_MIN_MS, UI_LIST_SCROLL_MAX_MS), 0);
+        }
     }
 }

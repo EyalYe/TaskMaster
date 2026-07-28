@@ -56,11 +56,13 @@ constructor isn't dropped by the linker).
   adjustable in Settings) collected into your namespace, with no core edits.
 - **`net_status.h`** — `net_is_online()` / `net_status_get()`. The UI re-renders you on connectivity
   change, so just read it in `render()`.
+- **`wx.h`** — `wx_local_time(struct tm*)` / `wx_time_str()`: core's NTP-derived **local** time
+  (app-API 1.3) for clocks/schedulers — don't run your own SNTP.
 - **`async_job.h`** — run blocking I/O off the UI task; the result callback runs back on the UI task.
   Cancel is **cooperative** (poll `async_job_cancelled()`); never tear down a client handle cross-thread.
 - **`app.h`** extras — `.tick_ms` (app-API 1.1) re-renders you every N ms for a clock/timer/animation;
-  `EV_SELECT_LONG` (1.2) is a long-press on Select. If you use these, `TASKMASTER_REQUIRE_API(1, 2)` and
-  pin a core `version:` ≥ that. (Full contract + version table: `docs/APP_API.md`.)
+  `EV_SELECT_LONG` (1.2) is a long-press on Select; `wx_local_time()` (1.3, `wx.h`) reads the clock. If you
+  use these, `TASKMASTER_REQUIRE_API(1, 3)` and pin a core `version:` ≥ that. (Full contract: `docs/APP_API.md`.)
 
 ## Rules
 

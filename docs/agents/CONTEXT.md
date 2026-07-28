@@ -15,7 +15,7 @@ bar (time · weather · connectivity), works offline, and updates over the air.
 
 | Repo | Role | Notes |
 |---|---|---|
-| **TaskMaster** (this repo) | The **sealed OS core**, semver-tagged (`v1.0`…`v1.2.1`) | `components/taskmaster_core` is the reusable OS component, pulled by others as a **git dependency** (pinned by tag). Also builds standalone for core development. |
+| **TaskMaster** (this repo) | The **sealed OS core**, semver-tagged (`v1.0`…`v1.3.0`) | `components/taskmaster_core` is the reusable OS component, pulled by others as a **git dependency** (pinned by tag). Also builds standalone for core development. |
 | **TM-Template** | The **fork target** for app developers | Thin project: `apps.yaml`, compose hook, `app_skeleton`, CI, local tools. Pulls `taskmaster_core` via git. Devs fork **this**, never core. |
 | **TM-Pomodoro** | Example app (own repo) | Full-screen graphical work/break timer; drove app-API **1.1** (`tick_ms`) + **1.2** (`EV_SELECT_LONG`). |
 | **TM-ToDo** | Example app (own repo) | Two apps (Cloud=Todoist / Local=LAN) sharing a header-only `todo_common` library; `apps.yaml` picks one. Supersedes the old TM-YappLocal / TM-YappCloud. |
@@ -92,6 +92,7 @@ parked):
 
 **App-API release history** (each a backward-compatible, example-driven addition, git-tagged):
 `v1.1.0` `tick_ms` (periodic re-render) · `v1.2.0` `EV_SELECT_LONG` (long-press Select) · `v1.2.1`
-Settings → Delete-data lists *all* saved app data (an `app_store` namespace registry, seeded from NVS).
+Settings → Delete-data lists *all* saved app data (an `app_store` namespace registry, seeded from NVS) ·
+`1.3` `wx_local_time()` — apps read core's NTP-derived local time (`wx.h`); drove the TM-Push scheduled push.
 
 See `PLAN.md` §14 for the phase table and §6E/§6F for the Phase-6 build log + example/release history.

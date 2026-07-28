@@ -12,6 +12,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <time.h>
 
 /* Start NTP + the fetch task. Call once at boot (after config + Wi-Fi init). */
 void wx_init(void);
@@ -21,6 +22,12 @@ void wx_refresh(void);
 
 /* "HH:MM" local time into `out`. False until NTP is synced AND an offset is known. */
 bool wx_time_str(char *out, size_t out_len);
+
+/* Current LOCAL time as broken-down fields (NTP UTC + the city's UTC offset), via
+ * gmtime_r on the offset-adjusted epoch — so tm_hour/tm_min/tm_sec/tm_yday are local.
+ * Returns false until NTP is synced AND an offset is known (same gate as
+ * wx_time_str). App-facing time source for schedulers (app-API 1.3). */
+bool wx_local_time(struct tm *out);
 
 /* Current weather: temperature (°C, rounded) + WMO weather code. False until fetched. */
 bool wx_weather(int *temp_c, int *weather_code);

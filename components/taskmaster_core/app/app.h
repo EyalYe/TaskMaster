@@ -21,7 +21,7 @@
  * Settings → Device info. Bump MAJOR for a breaking change, MINOR for a
  * backward-compatible addition. Core and apps thus version independently. */
 #define TM_API_VERSION_MAJOR 1
-#define TM_API_VERSION_MINOR 2
+#define TM_API_VERSION_MINOR 3
 
 /* Drop this at file scope in your app to require an app-API version. Compatible =
  * same MAJOR and at least the requested MINOR. A mismatch is a compile error. */

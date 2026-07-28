@@ -234,6 +234,17 @@ bool wx_time_str(char *out, size_t out_len)
     return true;
 }
 
+bool wx_local_time(struct tm *out)
+{
+    time_t now = time(NULL);
+    if (now < WX_EPOCH_VALID || !s_have_wx) {
+        return false;                 /* NTP not synced yet, or no tz offset */
+    }
+    time_t local = now + s_offset;
+    gmtime_r(&local, out);            /* offset already applied ⇒ gmtime gives local */
+    return true;
+}
+
 bool wx_weather(int *temp_c, int *weather_code)
 {
     if (!s_have_wx) return false;

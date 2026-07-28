@@ -8,7 +8,7 @@ rationale.
 
 > **You never modify the OS.** `taskmaster_core` is a fixed, immutable contract — everything your app
 > needs is exposed through the public headers described here (`app.h`, `ui_frame.h`, `ui_list.h`,
-> `app_store.h`, `net_status.h`, `async_job.h`, `app_config.h`). If a capability isn't exposed, treat it
+> `app_store.h`, `net_status.h`, `async_job.h`, `app_config.h`, `wx.h`). If a capability isn't exposed, treat it
 > as off-limits rather than reaching into core: your app lives entirely in its own component/repo.
 
 ## 1. The interface
@@ -209,6 +209,31 @@ transition rather than just redraw, cache the previous `state` in your own struc
 Never call `esp_wifi_*` yourself — the radio is owned by core (`wifi_mgr`, the Settings app's Wi-Fi
 setup portal, and its `WIFI_EN` toggle). The same `*_get()` + auto-re-render pattern will expose future status
 (battery, sync state) as the platform grows.
+
+## 5A. Reading the time (`wx.h`) — **app-API 1.3**
+
+Wall-clock time is platform state too: core runs NTP and derives your **local** time from the `city`
+config's UTC offset (see the status bar). Don't run your own SNTP — read core's result:
+
+```c
+#include "wx.h"
+#include <time.h>
+
+struct tm now;
+if (wx_local_time(&now)) {           // false until NTP synced AND an offset is known
+    int hh = now.tm_hour, mm = now.tm_min, ss = now.tm_sec;
+    // now.tm_yday (0..365) is handy to fire a daily action at most once per day
+}
+```
+
+- `wx_local_time(struct tm *out)` fills **local** broken-down time (the offset is already applied, so
+  the fields are local — no `TZ`/`localtime` needed). Returns **`false`** until the clock is valid;
+  handle that (e.g. show "waiting for time" and don't schedule yet).
+- `wx_time_str(char *out, size_t len)` is the convenience form → `"HH:MM"`.
+- **No DST logic** — the offset comes from the configured city's current `utc_offset_seconds`, refreshed
+  with the weather. It updates when core re-fetches, not instantaneously at a DST boundary.
+- Time only advances while you're rendering (there's no callback). Pair this with `.tick_ms` (§2) so a
+  time-driven screen re-evaluates on a cadence, and compute elapsed state from timestamps, not tick counts.
 
 ## 6. Persisting your own data (`app_store.h`)
 
